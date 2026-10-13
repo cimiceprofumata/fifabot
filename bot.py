@@ -27,11 +27,17 @@ PAROLE_CALDE = [
     "max ", "req", "upgrade", "playstyle", "fodder", "promo"
 ]
 
+PAROLE_VECCHIE_DA_ESCLUDERE = [
+    "fifa 20", "fifa 21", "fifa 22", "fifa 23",
+    "fc 24", "fc 25", "fc 26"
+]
+
 messaggi_gia_visti = set()
 ultimo_update_id = 0
+modello_scoperto = None
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9,it;q=0.8"
 }
 
@@ -51,61 +57,75 @@ def invia_telegram(testo, chat_id=None):
     except Exception as e:
         print("Errore Telegram:", e)
 
+def trova_modelli_attivi():
+    """Chiede direttamente a Google quali modelli Flash sono attivi sulla tua API Key."""
+    global modello_scoperto
+    modelli = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.0-flash", "gemini-flash-latest"]
+    if modello_scoperto:
+        modelli.insert(0, modello_scoperto)
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+        r = requests.get(url, timeout=10).json()
+        for m in r.get("models", []):
+            nome = m.get("name", "").replace("models/", "")
+            metodi = m.get("supportedGenerationMethods", [])
+            if "generateContent" in metodi and ("flash" in nome or "gemini-3" in nome):
+                if nome not in modelli:
+                    modelli.insert(0, nome)
+    except Exception:
+        pass
+    return modelli
+
 def chiedi_a_gemini_live(prompt_utente, usa_ricerca_web=True):
+    global modello_scoperto
     if not GEMINI_API_KEY:
-        return "⚠️ Chiave GEMINI_API_KEY non trovata nelle Environment Variables di Render."
+        return "⚠️ Chiave GEMINI_API_KEY non trovata su Render."
 
     oggi = datetime.now().strftime("%d/%m/%Y")
     sistema = (
-        f"Data di oggi: {oggi}. Sei un top trader di EA Sports FC Ultimate Team "
+        f"Data di oggi: {oggi}. Sei un top trader di EA Sports FC 27 Ultimate Team "
         "(mercato PlayStation, budget utente: 800.000 crediti). "
-        "Analizza le notizie e i leak forniti e indica cosa comprare, a quale fascia di prezzo "
+        "Analizza i leak e il mercato di FC 27 e indica esattamente cosa comprare, a che prezzo "
         "e quando rivendere considerando la tassa EA del 5%. "
         "Rispondi in italiano in modo diretto, pratico e schematico (massimo 10-12 righe). "
         "Non usare simboli Markdown come asterischi (*) o cancelletti (#). Usa solo elenchi con il pallino •."
     )
     testo_completo = f"{sistema}\n\nRichiesta: {prompt_utente}"
 
-    # 4 tentativi in cascata per evitare errori 'candidates' o blocchi modello/tool
-    tentativi = [
-        ("gemini-2.5-flash", True),
-        ("gemini-2.5-flash", False),
-        ("gemini-2.0-flash", True),
-        ("gemini-2.0-flash", False),
-    ]
-    if not usa_ricerca_web:
-        tentativi = [("gemini-2.5-flash", False), ("gemini-2.0-flash", False)]
-
+    modelli_da_provare = trova_modelli_attivi()
     ultimo_errore = "Nessuna risposta ricevuta"
-    for modello, con_search in tentativi:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{modello}:generateContent?key={GEMINI_API_KEY}"
-        body = {"contents": [{"parts": [{"text": testo_completo}]}]}
-        if con_search:
-            body["tools"] = [{"google_search": {}}]
-        try:
-            r = requests.post(url, json=body, timeout=25)
-            risposta = r.json()
 
-            if "error" in risposta:
-                ultimo_errore = risposta["error"].get("message", str(risposta["error"]))
+    for modello in modelli_da_provare:
+        opzioni_search = [True, False] if usa_ricerca_web else [False]
+        for con_search in opzioni_search:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{modello}:generateContent?key={GEMINI_API_KEY}"
+            body = {"contents": [{"parts": [{"text": testo_completo}]}]}
+            if con_search:
+                body["tools"] = [{"google_search": {}}]
+            try:
+                r = requests.post(url, json=body, timeout=25)
+                risposta = r.json()
+
+                if "error" in risposta:
+                    ultimo_errore = risposta["error"].get("message", str(risposta["error"]))
+                    continue
+
+                candidati = risposta.get("candidates", [])
+                if not candidati:
+                    continue
+
+                parti = candidati[0].get("content", {}).get("parts", [])
+                testi = [p.get("text", "") for p in parti if "text" in p]
+                out = "\n".join(testi).strip()
+                if out:
+                    modello_scoperto = modello
+                    out = out.replace("**", "").replace("*", "•").replace("#", "")
+                    return out.replace("<", "&lt;").replace(">", "&gt;")
+            except Exception as e:
+                ultimo_errore = str(e)
                 continue
 
-            candidati = risposta.get("candidates", [])
-            if not candidati:
-                ultimo_errore = f"Risposta bloccata o vuota ({risposta.get('promptFeedback', 'No candidates')})"
-                continue
-
-            parti = candidati[0].get("content", {}).get("parts", [])
-            testi = [p.get("text", "") for p in parti if "text" in p]
-            out = "\n".join(testi).strip()
-            if out:
-                out = out.replace("**", "").replace("*", "•").replace("#", "")
-                return out.replace("<", "&lt;").replace(">", "&gt;")
-        except Exception as e:
-            ultimo_errore = str(e)
-            continue
-
-    return f"⚠️ Impossibile completare l'analisi IA ({ultimo_errore[:120]}). Controlla che la GEMINI_API_KEY su Render sia attiva e senza spazi."
+    return f"⚠️ Errore API Gemini ({ultimo_errore[:140]})."
 
 def estrai_messaggi_html_telegram(html_text, nome_canale):
     risultati = []
@@ -115,7 +135,6 @@ def estrai_messaggi_html_telegram(html_text, nome_canale):
     blocchi = soup.find_all("div", class_="tgme_widget_message_text")
     for b in blocchi[-3:]:
         txt = b.get_text(separator=" ").strip()
-        # Scarta scritte di sistema di Telegram
         if len(txt) > 20 and "Download" not in txt and "Send Message" not in txt:
             risultati.append((nome_canale, txt[:280]))
     return risultati
@@ -123,7 +142,7 @@ def estrai_messaggi_html_telegram(html_text, nome_canale):
 def leggi_leak_con_bypass():
     raccolta = []
 
-    # 1. Lettura HTML pulita dei canali Telegram tramite codetabs proxy (o connessione diretta)
+    # 1. Lettura canali Telegram
     for canale in CANALI_LEAK:
         target_url = f"https://t.me/s/{canale}"
         urls_da_provare = [
@@ -142,16 +161,16 @@ def leggi_leak_con_bypass():
             except Exception:
                 continue
 
-    # 2. Integrazione sempre attiva da Google News RSS (non bloccabile da nessun server)
+    # 2. Ricerca RSS rigorosa SOLO su EA FC 27 (esclude vecchi FIFA)
     try:
-        rss_url = "https://news.google.com/rss/search?q=%22Ultimate+Team%22+(Leak+OR+Evolution+OR+SBC+OR+FUT)+when:3d&hl=en-US&gl=US&ceid=US:en"
+        rss_url = "https://news.google.com/rss/search?q=%22FC+27%22+(Ultimate+Team+OR+Evolution+OR+SBC+OR+Leak+OR+Promo)+when:7d&hl=en-US&gl=US&ceid=US:en"
         resp = requests.get(rss_url, headers=HEADERS, timeout=10)
         if resp.status_code == 200:
             root = ET.fromstring(resp.content)
-            for item in root.findall(".//item")[:4]:
-                titolo = item.find("title").text
-                if titolo:
-                    raccolta.append(("Web Leak Radar", titolo))
+            for item in root.findall(".//item")[:6]:
+                titolo = item.find("title").text or ""
+                if titolo and not any(old in titolo.lower() for old in PAROLE_VECCHIE_DA_ESCLUDERE):
+                    raccolta.append(("FC 27 Radar", titolo))
     except Exception as e:
         print("Errore RSS:", e)
 
@@ -191,31 +210,31 @@ def gestisci_comando(testo_msg, chat_id):
 
     if comando in ["/start", "/help", "/menu"]:
         menu = (
-            "🎮 <b>PANNELLO COMANDI BOT ULTIMATE TEAM (H24)</b>\n"
+            "🎮 <b>PANNELLO COMANDI BOT EA FC 27 (H24)</b>\n"
             "💰 Budget: 800.000 crediti (PS)\n\n"
-            "🔥 <b>/leak</b> - Scansiona leak e notizie live e ti dice chi comprare\n"
+            "🔥 <b>/leak</b> - Scansiona leak e notizie live su FC 27 e ti dice chi comprare\n"
             "🧬 <b>/evo</b> - Analizza le ultime Evoluzioni su FUT.GG e le carte Meta\n"
             "🧮 <b>/tassa 50000</b> - Calcola pareggio (5%) e profitto\n"
-            "🧠 <b>/chiedi [domanda]</b> - Chiedi strategia e prezzi a Gemini"
+            "🧠 <b>/chiedi [domanda]</b> - Chiedi strategia e prezzi a Gemini 3.8"
         )
         invia_telegram(menu, chat_id)
 
     elif comando == "/leak":
-        invia_telegram("📡 Scansione Live dei canali Leak e analisi Gemini in corso...", chat_id)
+        invia_telegram("📡 Scansione Live Leak EA FC 27 con Gemini 3.8 Flash in corso...", chat_id)
         leaks = leggi_leak_con_bypass()
         if leaks:
             testo_extra = "\n".join([f"[{c}]: {t}" for c, t in leaks])
         else:
-            testo_extra = "Usa la ricerca Google per trovare gli ultimi leak di oggi."
+            testo_extra = "Cerca sul web gli ultimi leak di oggi su EA Sports FC 27."
 
         prompt = (
-            f"Ecco le ultime notizie e leak intercettati:\n{testo_extra}\n\n"
-            "Cerca anche gli ultimissimi leak di oggi su Ultimate Team (Fut Sheriff, Fut Scoreboard, nuove SBC, Promo o Evoluzioni). "
-            "Riassumi le uscite più calde e dimmi quali carte o filtri comprare ADESSO su PlayStation con 800k crediti."
+            f"Notizie intercettate su FC 27:\n{testo_extra}\n\n"
+            "Cerca sul web gli ultimissimi leak di oggi su EA Sports FC 27 Ultimate Team (Future Stars, Ultimate Scream, nuove SBC, Evoluzioni, Fut Sheriff, Fut Scoreboard). "
+            "Riassumi le novità reali di FC 27 e dimmi quali carte o filtri comprare ADESSO su PlayStation con 800k crediti."
         )
         analisi = chiedi_a_gemini_live(prompt, usa_ricerca_web=True)
 
-        msg = "🚨 <b>REPORT LEAK & INVESTIMENTI IN TEMPO REALE:</b>\n\n"
+        msg = "🚨 <b>REPORT LEAK & INVESTIMENTI EA FC 27:</b>\n\n"
         if leaks:
             for c, t in leaks[:4]:
                 pulito = t.replace("<", "&lt;").replace(">", "&gt;")
@@ -224,20 +243,19 @@ def gestisci_comando(testo_msg, chat_id):
         invia_telegram(msg, chat_id)
 
     elif comando == "/evo":
-        invia_telegram("🧬 Lettura Evoluzioni FUT.GG e analisi carte Meta in corso...", chat_id)
+        invia_telegram("🧬 Lettura Evoluzioni FC 27 su FUT.GG e analisi carte Meta...", chat_id)
         evos = leggi_evo_con_bypass()
-        nomi = ", ".join([n for n, _ in evos]) if evos else "Ultime Evoluzioni attive su Ultimate Team"
+        nomi = ", ".join([n for n, _ in evos]) if evos else "Ultime Evoluzioni attive su EA Sports FC 27"
 
-        msg = "🔥 <b>RADAR EVOLUZIONI FUT.GG:</b>\n\n"
+        msg = "🔥 <b>RADAR EVOLUZIONI EA FC 27 (FUT.GG):</b>\n\n"
         if evos:
             for n, link in evos:
                 msg += f"• <b>{n}</b> 👉 <a href='{link}'>Apri su FUT.GG</a>\n"
             msg += "\n"
 
         prompt = (
-            f"Evoluzioni rilevate: {nomi}. "
-            "Indica quali sono le caratteristiche e le carte Meta migliori da comprare e rivendere "
-            "per le Evoluzioni attuali su PlayStation (budget 800k) e quando rivenderle."
+            f"Evoluzioni rilevate su EA FC 27: {nomi}. "
+            "Cerca le ultime Evoluzioni attive oggi su EA Sports FC 27 Ultimate Team e indica quali carte Meta conviene comprare e rivendere su PlayStation (budget 800k)."
         )
         consiglio = chiedi_a_gemini_live(prompt, usa_ricerca_web=True)
         msg += (
@@ -278,9 +296,9 @@ def gestisci_comando(testo_msg, chat_id):
             invia_telegram("Scrivi una domanda! Es: <code>/chiedi chi compro oggi con 200k?</code>", chat_id)
             return
         domanda = " ".join(parti[1:])
-        invia_telegram("🧠 Analisi di mercato con Gemini in corso...", chat_id)
+        invia_telegram("🧠 Analisi di mercato FC 27 con Gemini 3.8 in corso...", chat_id)
         risp = chiedi_a_gemini_live(domanda, usa_ricerca_web=True)
-        invia_telegram(f"🤖 <b>ANALISTA MERCATO LIVE:</b>\n\n{risp}", chat_id)
+        invia_telegram(f"🤖 <b>ANALISTA MERCATO FC 27:</b>\n\n{risp}", chat_id)
 
 def ascolta_comandi_telegram():
     global ultimo_update_id
@@ -322,13 +340,13 @@ def scansiona_leak_automatico():
             if any(k in txt.lower() for k in PAROLE_CALDE):
                 if len(messaggi_gia_visti) > 6:
                     analisi = chiedi_a_gemini_live(
-                        f"Nuovo leak Ultimate Team appena uscito: {txt}. "
+                        f"Nuovo leak EA FC 27 appena uscito: {txt}. "
                         "Dimmi in 3 punti chi comprare subito su PlayStation.",
                         usa_ricerca_web=True
                     )
                     pulito = txt[:280].replace("<", "&lt;").replace(">", "&gt;")
                     avviso = (
-                        f"🚨 <b>NUOVO LEAK RILEVATO ({fonte})!</b>\n\n"
+                        f"🚨 <b>NUOVO LEAK FC 27 RILEVATO ({fonte})!</b>\n\n"
                         f"📝 <i>{pulito}</i>\n\n"
                         f"🧠 <b>COSA COMPRARE ORA:</b>\n{analisi}"
                     )
@@ -336,7 +354,7 @@ def scansiona_leak_automatico():
 
 def motore_h24():
     avvio = (
-        "✅ <b>BOT AGGIORNATO (FIX CANDIDATES + PARSER PULITO)!</b>\n\n"
+        "🚀 <b>BOT AGGIORNATO A GEMINI 3.8 FLASH + FILTRO ESCLUSIVO FC 27!</b>\n\n"
         "Prova subito <b>/leak</b>, <b>/evo</b> oppure <b>/chiedi chi compro oggi?</b>"
     )
     invia_telegram(avvio)
@@ -364,7 +382,7 @@ def motore_h24():
 
 @app.route("/")
 def home():
-    return "FC Bot H24 Running OK!"
+    return "FC 27 Bot H24 with Gemini 3.8 Running OK!"
 
 threading.Thread(target=motore_h24, daemon=True).start()
 threading.Thread(target=ascolta_comandi_telegram, daemon=True).start()
@@ -372,3 +390,4 @@ threading.Thread(target=ascolta_comandi_telegram, daemon=True).start()
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
