@@ -4,15 +4,16 @@ import time
 import threading
 import requests
 import xml.etree.ElementTree as ET
+from urllib.parse import quote
 from bs4 import BeautifulSoup
 from flask import Flask
 from datetime import datetime, timezone, timedelta
 
 app = Flask(__name__)
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+TELEGRAM_TOKEN = (os.environ.get("TELEGRAM_TOKEN") or "").strip()
+TELEGRAM_CHAT_ID = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or "").strip()
 EA_TAX = 0.05
 
 CANALI_LEAK = [
@@ -23,14 +24,15 @@ CANALI_LEAK = [
 
 PAROLE_CALDE = [
     "evo", "evolution", "sbc", "potm", "leak",
-    "max ", "req", "upgrade", "playstyle", "fodder"
+    "max ", "req", "upgrade", "playstyle", "fodder", "promo"
 ]
 
 messaggi_gia_visti = set()
 ultimo_update_id = 0
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9,it;q=0.8"
 }
 
 def invia_telegram(testo, chat_id=None):
@@ -50,94 +52,135 @@ def invia_telegram(testo, chat_id=None):
         print("Errore Telegram:", e)
 
 def chiedi_a_gemini_live(prompt_utente, usa_ricerca_web=True):
-    """Interroga Gemini attivando Google Search Live per aggirare qualsiasi blocco Cloudflare."""
     if not GEMINI_API_KEY:
-        return "Chiave GEMINI_API_KEY non trovata su Render."
-    
-    base = "https://generativelanguage.googleapis.com/v1beta/models/"
-    url = f"{base}gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    
+        return "⚠️ Chiave GEMINI_API_KEY non trovata nelle Environment Variables di Render."
+
     oggi = datetime.now().strftime("%d/%m/%Y")
     sistema = (
-        f"Data di oggi: {oggi}. Sei un top trader di Ultimate Team (mercato PlayStation, budget 800.000 crediti). "
-        "Usa la ricerca web per trovare gli ultimissimi leak, SBC, Evoluzioni di FUT.GG e prezzi attuali. "
-        "Rispondi in italiano in modo diretto, pratico e schematico (max 12 righe). "
-        "Non usare mai simboli Markdown come asterischi (*) o cancelletti (#). Usa solo elenchi con il pallino •. "
-        "Considera sempre la tassa EA del 5%."
+        f"Data di oggi: {oggi}. Sei un top trader di EA Sports FC Ultimate Team "
+        "(mercato PlayStation, budget utente: 800.000 crediti). "
+        "Analizza le notizie e i leak forniti e indica cosa comprare, a quale fascia di prezzo "
+        "e quando rivendere considerando la tassa EA del 5%. "
+        "Rispondi in italiano in modo diretto, pratico e schematico (massimo 10-12 righe). "
+        "Non usare simboli Markdown come asterischi (*) o cancelletti (#). Usa solo elenchi con il pallino •."
     )
     testo_completo = f"{sistema}\n\nRichiesta: {prompt_utente}"
-    
-    body = {
-        "contents": [{"parts": [{"text": testo_completo}]}]
-    }
-    if usa_ricerca_web:
-        body["tools"] = [{"google_search": {}}]
 
-    try:
-        r = requests.post(url, json=body, timeout=30)
-        risposta = r.json()
-        
-        # Se l'account API non supporta il tool search, riprova senza tool
-        if "error" in risposta and usa_ricerca_web:
-            return chiedi_a_gemini_live(prompt_utente, usa_ricerca_web=False)
-            
-        parti = risposta["candidates"][0]["content"]["parts"]
-        out = "".join([p.get("text", "") for p in parti])
-        out = out.replace("**", "").replace("*", "•").replace("#", "")
-        return out.replace("<", "&lt;").replace(">", "&gt;")
-    except Exception as e:
-        return f"Errore analisi IA: {e}"
+    # 4 tentativi in cascata per evitare errori 'candidates' o blocchi modello/tool
+    tentativi = [
+        ("gemini-2.5-flash", True),
+        ("gemini-2.5-flash", False),
+        ("gemini-2.0-flash", True),
+        ("gemini-2.0-flash", False),
+    ]
+    if not usa_ricerca_web:
+        tentativi = [("gemini-2.5-flash", False), ("gemini-2.0-flash", False)]
+
+    ultimo_errore = "Nessuna risposta ricevuta"
+    for modello, con_search in tentativi:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{modello}:generateContent?key={GEMINI_API_KEY}"
+        body = {"contents": [{"parts": [{"text": testo_completo}]}]}
+        if con_search:
+            body["tools"] = [{"google_search": {}}]
+        try:
+            r = requests.post(url, json=body, timeout=25)
+            risposta = r.json()
+
+            if "error" in risposta:
+                ultimo_errore = risposta["error"].get("message", str(risposta["error"]))
+                continue
+
+            candidati = risposta.get("candidates", [])
+            if not candidati:
+                ultimo_errore = f"Risposta bloccata o vuota ({risposta.get('promptFeedback', 'No candidates')})"
+                continue
+
+            parti = candidati[0].get("content", {}).get("parts", [])
+            testi = [p.get("text", "") for p in parti if "text" in p]
+            out = "\n".join(testi).strip()
+            if out:
+                out = out.replace("**", "").replace("*", "•").replace("#", "")
+                return out.replace("<", "&lt;").replace(">", "&gt;")
+        except Exception as e:
+            ultimo_errore = str(e)
+            continue
+
+    return f"⚠️ Impossibile completare l'analisi IA ({ultimo_errore[:120]}). Controlla che la GEMINI_API_KEY su Render sia attiva e senza spazi."
+
+def estrai_messaggi_html_telegram(html_text, nome_canale):
+    risultati = []
+    if not html_text or "tgme_widget_message_text" not in html_text:
+        return risultati
+    soup = BeautifulSoup(html_text, "html.parser")
+    blocchi = soup.find_all("div", class_="tgme_widget_message_text")
+    for b in blocchi[-3:]:
+        txt = b.get_text(separator=" ").strip()
+        # Scarta scritte di sistema di Telegram
+        if len(txt) > 20 and "Download" not in txt and "Send Message" not in txt:
+            risultati.append((nome_canale, txt[:280]))
+    return risultati
 
 def leggi_leak_con_bypass():
-    """Legge i canali Telegram e i feed di notizie passando da proxy e RSS per evitare blocchi IP su Render."""
     raccolta = []
-    
-    # 1. Tentativo tramite Proxy Reader (aggira il blocco IP di Render su t.me)
-    for canale in CANALI_LEAK:
-        try:
-            url_proxy = f"https://r.jina.ai/https://t.me/s/{canale}"
-            resp = requests.get(url_proxy, headers=HEADERS, timeout=12)
-            if resp.status_code == 200 and len(resp.text) > 200:
-                righe = [line.strip() for line in resp.text.split("\n") if len(line.strip()) > 35]
-                ultime = [r for r in righe if not r.startswith("http") and "Telegram" not in r][-2:]
-                for u in ultime:
-                    raccolta.append((canale, u[:250]))
-        except Exception:
-            pass
 
-    # 2. Backup sempre attivo tramite Google News RSS su Ultimate Team Leaks & Evolutions
-    if not raccolta:
-        try:
-            rss_url = "https://news.google.com/rss/search?q=Ultimate+Team+Leak+OR+Evolution+OR+SBC+when:2d&hl=en-US&gl=US&ceid=US:en"
-            resp = requests.get(rss_url, headers=HEADERS, timeout=10)
-            if resp.status_code == 200:
-                root = ET.fromstring(resp.content)
-                for item in root.findall(".//item")[:5]:
-                    titolo = item.find("title").text
-                    raccolta.append(("Leak Radar", titolo))
-        except Exception as e:
-            print("Errore RSS:", e)
+    # 1. Lettura HTML pulita dei canali Telegram tramite codetabs proxy (o connessione diretta)
+    for canale in CANALI_LEAK:
+        target_url = f"https://t.me/s/{canale}"
+        urls_da_provare = [
+            target_url,
+            f"https://api.codetabs.com/v1/proxy?quest={quote(target_url, safe='')}",
+            f"https://api.allorigins.win/raw?url={quote(target_url, safe='')}"
+        ]
+        for u in urls_da_provare:
+            try:
+                resp = requests.get(u, headers=HEADERS, timeout=10)
+                if resp.status_code == 200 and "tgme_widget_message_text" in resp.text:
+                    estratti = estrai_messaggi_html_telegram(resp.text, canale)
+                    if estratti:
+                        raccolta.extend(estratti[-2:])
+                        break
+            except Exception:
+                continue
+
+    # 2. Integrazione sempre attiva da Google News RSS (non bloccabile da nessun server)
+    try:
+        rss_url = "https://news.google.com/rss/search?q=%22Ultimate+Team%22+(Leak+OR+Evolution+OR+SBC+OR+FUT)+when:3d&hl=en-US&gl=US&ceid=US:en"
+        resp = requests.get(rss_url, headers=HEADERS, timeout=10)
+        if resp.status_code == 200:
+            root = ET.fromstring(resp.content)
+            for item in root.findall(".//item")[:4]:
+                titolo = item.find("title").text
+                if titolo:
+                    raccolta.append(("Web Leak Radar", titolo))
+    except Exception as e:
+        print("Errore RSS:", e)
 
     return raccolta
 
 def leggi_evo_con_bypass():
-    """Legge le Evoluzioni di FUT.GG passando dal proxy reader Jina per superare Cloudflare."""
     lista_evo = []
-    try:
-        url_proxy = "https://r.jina.ai/https://www.fut.gg/evolutions/"
-        resp = requests.get(url_proxy, headers=HEADERS, timeout=15)
-        if resp.status_code == 200:
-            links = re.findall(r"/evolutions/\d+-[a-zA-Z0-9-]+/", resp.text)
-            visti = []
-            for l in links:
-                if l not in visti:
-                    visti.append(l)
-            for link in visti[:6]:
-                pezzo = link.split("-", 1)[-1].replace("/", "")
-                nome = pezzo.replace("-", " ").title()
-                lista_evo.append((nome, f"https://www.fut.gg{link}"))
-    except Exception as e:
-        print("Errore Proxy FUT.GG:", e)
+    target = "https://www.fut.gg/evolutions/"
+    tentativi_url = [
+        f"https://api.codetabs.com/v1/proxy?quest={quote(target, safe='')}",
+        "https://r.jina.ai/https://www.fut.gg/evolutions/"
+    ]
+    for u in tentativi_url:
+        try:
+            resp = requests.get(u, headers=HEADERS, timeout=12)
+            if resp.status_code == 200:
+                links = re.findall(r"/evolutions/\d+-[a-zA-Z0-9-]+/", resp.text)
+                visti = []
+                for l in links:
+                    if l not in visti:
+                        visti.append(l)
+                for link in visti[:6]:
+                    pezzo = link.split("-", 1)[-1].replace("/", "")
+                    nome = pezzo.replace("-", " ").title()
+                    lista_evo.append((nome, f"https://www.fut.gg{link}"))
+                if lista_evo:
+                    break
+        except Exception:
+            continue
     return lista_evo
 
 def gestisci_comando(testo_msg, chat_id):
@@ -150,47 +193,51 @@ def gestisci_comando(testo_msg, chat_id):
         menu = (
             "🎮 <b>PANNELLO COMANDI BOT ULTIMATE TEAM (H24)</b>\n"
             "💰 Budget: 800.000 crediti (PS)\n\n"
-            "🔥 <b>/leak</b> - Scansiona il web e i leaker in tempo reale e ti dice chi comprare\n"
+            "🔥 <b>/leak</b> - Scansiona leak e notizie live e ti dice chi comprare\n"
             "🧬 <b>/evo</b> - Analizza le ultime Evoluzioni su FUT.GG e le carte Meta\n"
             "🧮 <b>/tassa 50000</b> - Calcola pareggio (5%) e profitto\n"
-            "🧠 <b>/chiedi [domanda]</b> - Ricerca live su mercato e prezzi con Gemini"
+            "🧠 <b>/chiedi [domanda]</b> - Chiedi strategia e prezzi a Gemini"
         )
         invia_telegram(menu, chat_id)
 
     elif comando == "/leak":
-        invia_telegram("📡 Scansione Live (Bypass + Google Search) sugli ultimi Leak in corso...", chat_id)
+        invia_telegram("📡 Scansione Live dei canali Leak e analisi Gemini in corso...", chat_id)
         leaks = leggi_leak_con_bypass()
-        testo_extra = "\n".join([f"[{c}]: {t}" for c, t in leaks]) if leaks else "Cerca direttamente sul web."
-        
+        if leaks:
+            testo_extra = "\n".join([f"[{c}]: {t}" for c, t in leaks])
+        else:
+            testo_extra = "Usa la ricerca Google per trovare gli ultimi leak di oggi."
+
         prompt = (
-            f"Notizie intercettate: {testo_extra}\n"
-            "Cerca sul web gli ultimissimi leak di oggi su Ultimate Team (Fut Sheriff, Fut Scoreboard, nuove SBC, nuove Promo o Evoluzioni). "
-            "Elenca i leak più importanti del momento e dimmi esattamente quali carte o filtri comprare ADESSO su PlayStation con 800k crediti."
+            f"Ecco le ultime notizie e leak intercettati:\n{testo_extra}\n\n"
+            "Cerca anche gli ultimissimi leak di oggi su Ultimate Team (Fut Sheriff, Fut Scoreboard, nuove SBC, Promo o Evoluzioni). "
+            "Riassumi le uscite più calde e dimmi quali carte o filtri comprare ADESSO su PlayStation con 800k crediti."
         )
         analisi = chiedi_a_gemini_live(prompt, usa_ricerca_web=True)
-        
+
         msg = "🚨 <b>REPORT LEAK & INVESTIMENTI IN TEMPO REALE:</b>\n\n"
         if leaks:
-            for c, t in leaks[:3]:
+            for c, t in leaks[:4]:
                 pulito = t.replace("<", "&lt;").replace(">", "&gt;")
-                msg += f"📢 <b>{c}:</b> <i>{pulito[:140]}...</i>\n\n"
+                msg += f"📢 <b>{c}:</b> <i>{pulito[:160]}</i>\n\n"
         msg += f"🧠 <b>ANALISI LIVE GEMINI:</b>\n{analisi}"
         invia_telegram(msg, chat_id)
 
     elif comando == "/evo":
-        invia_telegram("🧬 Lettura Evoluzioni FUT.GG (con Bypass Cloudflare + Ricerca Live)...", chat_id)
+        invia_telegram("🧬 Lettura Evoluzioni FUT.GG e analisi carte Meta in corso...", chat_id)
         evos = leggi_evo_con_bypass()
-        nomi = ", ".join([n for n, _ in evos]) if evos else "Cerca le ultime Evoluzioni attive su FUT.GG"
-        
+        nomi = ", ".join([n for n, _ in evos]) if evos else "Ultime Evoluzioni attive su Ultimate Team"
+
         msg = "🔥 <b>RADAR EVOLUZIONI FUT.GG:</b>\n\n"
         if evos:
             for n, link in evos:
                 msg += f"• <b>{n}</b> 👉 <a href='{link}'>Apri su FUT.GG</a>\n"
             msg += "\n"
-            
+
         prompt = (
-            f"Evoluzioni rilevate: {nomi}. Cerca su FUT.GG le ultime Evoluzioni uscite su Ultimate Team e i giocatori Trending. "
-            "Dimmi quali sono le migliori carte Meta da comprare e rivendere per queste Evoluzioni e i filtri da usare."
+            f"Evoluzioni rilevate: {nomi}. "
+            "Indica quali sono le caratteristiche e le carte Meta migliori da comprare e rivendere "
+            "per le Evoluzioni attuali su PlayStation (budget 800k) e quando rivenderle."
         )
         consiglio = chiedi_a_gemini_live(prompt, usa_ricerca_web=True)
         msg += (
@@ -228,10 +275,10 @@ def gestisci_comando(testo_msg, chat_id):
 
     elif comando == "/chiedi":
         if len(parti) < 2:
-            invia_telegram("Scrivi una domanda! Es: <code>/chiedi chi compro oggi?</code>", chat_id)
+            invia_telegram("Scrivi una domanda! Es: <code>/chiedi chi compro oggi con 200k?</code>", chat_id)
             return
         domanda = " ".join(parti[1:])
-        invia_telegram("🧠 Ricerca sul web e analisi con Gemini in corso...", chat_id)
+        invia_telegram("🧠 Analisi di mercato con Gemini in corso...", chat_id)
         risp = chiedi_a_gemini_live(domanda, usa_ricerca_web=True)
         invia_telegram(f"🤖 <b>ANALISTA MERCATO LIVE:</b>\n\n{risp}", chat_id)
 
@@ -273,7 +320,7 @@ def scansiona_leak_automatico():
         if id_msg not in messaggi_gia_visti:
             messaggi_gia_visti.add(id_msg)
             if any(k in txt.lower() for k in PAROLE_CALDE):
-                if len(messaggi_gia_visti) > 5:
+                if len(messaggi_gia_visti) > 6:
                     analisi = chiedi_a_gemini_live(
                         f"Nuovo leak Ultimate Team appena uscito: {txt}. "
                         "Dimmi in 3 punti chi comprare subito su PlayStation.",
@@ -289,9 +336,8 @@ def scansiona_leak_automatico():
 
 def motore_h24():
     avvio = (
-        "🛡️ <b>BOT AGGIORNATO CON BYPASS CLOUDFLARE + RICERCA LIVE GOOGLE!</b>\n\n"
-        "Adesso <b>/leak</b> ed <b>/evo</b> usano il proxy di lettura e la ricerca web in tempo reale di Gemini!\n"
-        "Provali subito qui in chat."
+        "✅ <b>BOT AGGIORNATO (FIX CANDIDATES + PARSER PULITO)!</b>\n\n"
+        "Prova subito <b>/leak</b>, <b>/evo</b> oppure <b>/chiedi chi compro oggi?</b>"
     )
     invia_telegram(avvio)
     scansiona_leak_automatico()
@@ -318,7 +364,7 @@ def motore_h24():
 
 @app.route("/")
 def home():
-    return "FC Bot H24 with Cloudflare Bypass Running OK!"
+    return "FC Bot H24 Running OK!"
 
 threading.Thread(target=motore_h24, daemon=True).start()
 threading.Thread(target=ascolta_comandi_telegram, daemon=True).start()
