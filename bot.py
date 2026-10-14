@@ -1,3 +1,4 @@
+
 import os
 import re
 import time
@@ -31,11 +32,12 @@ PAROLE_TRIGGER = [
 ]
 
 messaggi_gia_visti = set()
+evo_gia_viste = set()
 ultimo_update_id = 0
 modello_scoperto = None
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept-Language": "en-US,en;q=0.9",
     "Cache-Control": "no-cache"
 }
@@ -78,7 +80,8 @@ def trova_modelli_attivi():
         pass
     return modelli
 
-def analizza_senza_allucinazioni(prompt_specifico):
+def anticipa_mercato_con_gemini(prompt_specifico):
+    """Motore Pre-Hype: proibisce di copiare i Trending e calcola in anticipo le carte migliori dai requisiti del leak."""
     global modello_scoperto
     if not GEMINI_API_KEY:
         return "⚠️ Chiave GEMINI_API_KEY non trovata su Render."
@@ -86,21 +89,22 @@ def analizza_senza_allucinazioni(prompt_specifico):
     tz_it = timezone(timedelta(hours=2))
     oggi = datetime.now(tz_it).strftime("%d/%m/%Y %H:%M")
     sistema = (
-        f"Data e ora attuale italiana: {oggi}. Sei un analista tecnico di mercato di EA Sports FC 27 Ultimate Team (PlayStation). "
-        "REGOLE FERREE ANTI-ALLUCINAZIONE (VIETATO INVENTARE DATI):\n"
-        "1) NON INVENTARE MAI leak, prezzi, Meta Rating o PlayStyles. Basati SOLO sui post reali forniti qui sotto e sulla ricerca web live.\n"
-        "2) PREZZI REALISTICI DEL MERCATO: Ricorda che le carte Oro Raro 75-82 OVR hanno un Price Range massimo di 10.000 crediti e di base costano "
-        "650 - 1.500 crediti (quando vanno in hype per un'Evo salgono a 2.500 - 9.500 crediti o vanno extinct a 10k, MAI a 50k o 150k!). "
-        "Solo le carte Promo/TOTW/Icon o Oro 88+ superano i 30k-100k.\n"
-        "3) DESCRIZIONE SPECIFICA DI OGNI LEAK: All'inizio della risposta elenca chiaramente QUALE leak o Evoluzione stai analizzando, "
-        "indicando: FONTE (@Fut_Scoreboard / @FutSheriff / FUT.GG), DATA e ORARIO di uscita del leak, REQUISITI ESATTI (Max OVR, Max Pace, Ruolo, Max PlayStyles) "
-        "e QUALI STATS (+Pace, +Shooting, +Passing...) e QUALI PLAYSTYLES / PLAYSTYLE+ va ad aggiungere.\n"
-        "4) Se nei dati ricevuti non c'è scritto il dettaglio di un boost o di un Meta Rating esatto, scrivi onestamente 'Non ancora specificato nel leak' "
-        "invece di tirare a indovinare.\n"
-        "5) Per ogni carta consigliata scrivi: Nome e Cognome, OVR e versione, perché entra nei requisiti dell'Evo, prezzo reale attuale su PS (es. 700-1.200 cr) e target reale nell'hype (es. 3.500-8.000 cr).\n"
-        "Non usare simboli Markdown come asterischi (*) o cancelletti (#). Usa solo elenchi con •."
+        f"Data e ora attuale italiana: {oggi}. Sei un algoritmo predittivo di compravendita per EA Sports FC 27 Ultimate Team (PlayStation). "
+        "IL TUO UNICO OBIETTIVO È FAR COMPRARE LE CARTE ALL'UTENTE PRIMA CHE FINISCANO IN TRENDING SU FUT.GG:\n"
+        "1) NON COPIARE I TRENDING PLAYERS: Se una carta è già prima in Trending, è già tardi. Tu devi guardare i REQUISITI e i BOOST del nuovo Leak (o della nuova Evo appena uscita) "
+        "e trovare nel database di EA FC 27 le 6 CARTE PERFETTE (Nome, Cognome, OVR, Club) che la massa non ha ancora comprato!\n"
+        "2) COME INDIVIDUARE LE CARTE PRE-HYPE (METODO META RATING FUT.GG):\n"
+        "   - Cerca carte 'AL LIMITE DEL REQUISITO' (es. se il leak dice Max 82 OVR, Max 85 PAC, cerca carte 81-82 OVR con 83-85 PAC).\n"
+        "   - Devono avere PlayStyles base in meta (Quick Step, Anticipate, Finesse Shot, Incisive Pass, Rapid, Technical, Intercept, Jockey) "
+        "che sommati al PlayStyle+ regalato dal leak creano una combo da 92+ Meta Rating su FUT.GG.\n"
+        "   - Devono avere link molto ricercati (Premier League, LaLiga, Serie A, Francia, Brasile) o possibilità di Catena Evo (Evo Chain).\n"
+        "3) FORMATO OBBLIGATORIO DELLA RISPOSTA:\n"
+        "   • SCHEDA DEL LEAK / NUOVA EVO: Indica Fonte, Data/Ora, Requisiti esatti di ingresso e quali Stats + PlayStyles aggiunge.\n"
+        "   • 6 CARTE PRE-TRENDING DA COMPRARE ORA: Per ogni giocatore scrivi Nome e Cognome, OVR e versione, PlayStyles attuali + come diventa col boost, "
+        "Prezzo attuale pre-hype su PS (650-1.500 cr per gli Oro scarto, 11k-20k per TOTW/Speciali) e Target di vendita quando andrà in Trending su FUT.GG (3.500-9.500 cr per gli Oro, 25k-45k per Speciali).\n"
+        "4) VIETATO INVENTARE PREZZI ASSURDI (gli Oro <83 hanno tetto massimo a 10.000 crediti!). Non usare asterischi (*) o cancelletti (#), usa solo •."
     )
-    testo_completo = f"{sistema}\n\nDATI REALI RACCOLTI ORA:\n{prompt_specifico}"
+    testo_completo = f"{sistema}\n\nDATI LIVE INTERCETTATI:\n{prompt_specifico}"
 
     modelli_da_provare = trova_modelli_attivi()
     ultimo_errore = "Nessuna risposta"
@@ -110,7 +114,7 @@ def analizza_senza_allucinazioni(prompt_specifico):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{modello}:generateContent?key={GEMINI_API_KEY}"
             body = {
                 "contents": [{"parts": [{"text": testo_completo}]}],
-                "generationConfig": {"temperature": 0.1}
+                "generationConfig": {"temperature": 0.15}
             }
             if tool_config:
                 body["tools"] = tool_config
@@ -136,90 +140,99 @@ def analizza_senza_allucinazioni(prompt_specifico):
 
     return f"⚠️ Errore API Gemini: {ultimo_errore[:140]}"
 
-def scarica_html_grezzo(target_url):
-    tentativi = [
-        target_url,
-        f"https://api.allorigins.win/raw?url={quote(target_url, safe='')}",
-        f"https://api.codetabs.com/v1/proxy?quest={quote(target_url, safe='')}"
-    ]
-    for u in tentativi:
-        try:
-            resp = scraper.get(u, headers=HEADERS, timeout=12)
-            if resp.status_code == 200 and len(resp.text) > 500:
-                return resp.text
-        except Exception:
-            continue
-    return ""
-
 def scarica_testo_jina(target_url):
+    """Buca Cloudflare e i blocchi IP di Render sia per Telegram che per FUT.GG."""
     try:
         h = dict(HEADERS)
         h["X-No-Cache"] = "true"
         resp = requests.get(f"https://r.jina.ai/{target_url}", headers=h, timeout=15)
-        if resp.status_code == 200:
+        if resp.status_code == 200 and len(resp.text) > 200:
             return resp.text
     except Exception:
         pass
     return ""
 
-def leggi_leak_telegram_con_data_ora():
+def leggi_leak_telegram_tramite_jina():
+    """Legge i canali Telegram dei leaker passando da Jina (che non viene schermato da Render) + fallback HTML."""
     raccolta = []
     tz_it = timezone(timedelta(hours=2))
+    ora_oggi = datetime.now(tz_it).strftime("%d/%m/%Y")
 
-    for canale in CANALI_X_LEAKERS:
-        html = scarica_html_grezzo(f"https://t.me/s/{canale}")
-        if "tgme_widget_message" in html:
-            soup = BeautifulSoup(html, "html.parser")
-            messaggi = soup.find_all("div", class_="tgme_widget_message")
-            for m in messaggi[-4:]:
-                box_testo = m.find("div", class_="tgme_widget_message_text")
-                if not box_testo:
-                    continue
-                txt = box_testo.get_text(separator=" ").strip()
-                if len(txt) < 15:
-                    continue
+    for canale in CANALI_X_LEAKERS[:4]:
+        url_tg = f"https://t.me/s/{canale}"
+        testo_raw = scarica_testo_jina(url_tg)
+        if not testo_raw:
+            continue
 
-                data_ora_str = "Orario N/D"
-                tag_time = m.find("time")
-                if tag_time and tag_time.get("datetime"):
-                    try:
-                        dt_utc = datetime.fromisoformat(tag_time["datetime"].replace("Z", "+00:00"))
-                        dt_it = dt_utc.astimezone(tz_it)
-                        data_ora_str = dt_it.strftime("%d/%m/%Y ore %H:%M")
-                    except Exception:
-                        data_ora_str = tag_time.get("datetime")[:16]
+        # Divide la pagina in blocchi di messaggi e scarta le scritte di interfaccia di Telegram
+        righe = testo_raw.split("\n")
+        messaggi_canale = []
+        buffer_msg = []
 
-                raccolta.append({
-                    "canale": f"@{canale}",
-                    "data_ora": data_ora_str,
-                    "testo": txt[:450]
-                })
+        for r in righe:
+            r_clean = r.strip()
+            if not r_clean:
+                continue
+            # Scarta righe inutili di intestazione/footer Telegram
+            if any(skip in r_clean for skip in [
+                "Title:", "URL Source:", "Markdown Content:", "Warning:",
+                "Download Telegram", "View in Telegram", "Send Message", "subscribers", "photos", "videos"
+            ]):
+                continue
+            if r_clean.startswith("![Image"):
+                continue
+
+            # Cerca se nella riga c'è l'orario del post (es. 18:45 o 07:30)
+            match_ora = re.search(r"\b([01]\d|2[0-3]):([0-5]\d)\b", r_clean)
+            if match_ora and buffer_msg:
+                testo_unito = " ".join(buffer_msg).strip()
+                if len(testo_unito) > 25:
+                    messaggi_canale.append((f"{ora_oggi} {match_ora.group(0)}", testo_unito[:420]))
+                buffer_msg = []
+            else:
+                if len(r_clean) > 15 and not r_clean.startswith("http"):
+                    buffer_msg.append(r_clean)
+
+        # Se non ha trovato orari separati, prende comunque gli ultimi paragrafi di testo del canale
+        if not messaggi_canale and buffer_msg:
+            for pezzo in buffer_msg[-3:]:
+                if len(pezzo) > 30:
+                    messaggi_canale.append((f"{ora_oggi} (Live)", pezzo[:420]))
+
+        for data_ora, txt in messaggi_canale[-2:]:
+            raccolta.append({
+                "canale": f"@{canale}",
+                "data_ora": data_ora,
+                "testo": txt
+            })
+
     return raccolta
 
-def leggi_dettagli_evo_e_trending_futgg():
-    testo_evo_page = scarica_testo_jina("https://www.fut.gg/evolutions/")
-    testo_momentum = scarica_testo_jina("https://www.fut.gg/players/momentum/")
-    testo_best_evo = scarica_testo_jina("https://www.fut.gg/evolutions/trending/")
-
-    giocatori = []
-    for sorgente in [testo_best_evo, testo_momentum]:
-        matches = re.findall(r"/players/\d+-([a-zA-Z0-9-]+)/", sorgente)
-        for slug in matches:
-            nome = slug.replace("-", " ").title()
-            if len(nome) > 3 and nome not in giocatori:
-                giocatori.append(nome)
-
+def leggi_requisiti_e_boost_ultima_evo_futgg():
+    """Entra nella pagina Evoluzioni di FUT.GG e apre ANCHE la prima Evoluzione in alto per estrarre Requisiti e Boost veri!"""
+    testo_main = scarica_testo_jina("https://www.fut.gg/evolutions/")
     evoluzioni = []
-    links_evo = re.findall(r"/evolutions/\d+-([a-zA-Z0-9-]+)/", testo_evo_page)
-    for slug in links_evo:
+    primo_link_evo = ""
+
+    matches = re.findall(r"(/evolutions/\d+-([a-zA-Z0-9-]+)/)", testo_main)
+    for full_path, slug in matches:
         nome_e = slug.replace("-", " ").title()
         if nome_e not in evoluzioni:
             evoluzioni.append(nome_e)
+            if not primo_link_evo:
+                primo_link_evo = f"https://www.fut.gg{full_path}"
 
-    righe_evo = [r.strip() for r in testo_evo_page.split("\n") if len(r.strip()) > 25 and "http" not in r]
-    estratto_dettagli_evo = "\n".join(righe_evo[:25])
+    dettaglio_prima_evo = ""
+    if primo_link_evo:
+        testo_singola_evo = scarica_testo_jina(primo_link_evo)
+        righe_valide = []
+        for r in testo_singola_evo.split("\n"):
+            rc = r.strip()
+            if len(rc) > 10 and not rc.startswith("![") and "http" not in rc:
+                righe_valide.append(rc)
+        dettaglio_prima_evo = "\n".join(righe_valide[:35])
 
-    return evoluzioni[:8], giocatori[:15], estratto_dettagli_evo[:1500]
+    return evoluzioni[:6], primo_link_evo, dettaglio_prima_evo[:1800]
 
 def gestisci_comando(testo_msg, chat_id):
     parti = testo_msg.strip().split()
@@ -229,111 +242,94 @@ def gestisci_comando(testo_msg, chat_id):
 
     if comando in ["/start", "/help", "/menu"]:
         menu = (
-            "🎯 <b>BOT SNIPER REAL-DATA (ZERO ALLUCINAZIONI)</b>\n"
+            "🎯 <b>BOT PRE-TRENDING LEAK & EVO SNIPER (FC 27)</b>\n"
             "💰 Budget: 800.000 crediti (PlayStation)\n\n"
-            "🔥 <b>/leak</b> - Mostra gli ultimi leak REALI con <b>Data, Ora, Stats e PlayStyles aggiunti</b> + carte reali con prezzi veri\n\n"
-            "🧬 <b>/evo</b> - Legge le Evoluzioni reali su FUT.GG, requisiti, boost e giocatori in trending\n\n"
-            "🔮 <b>/simula [requisiti e boost]</b> - Analizza un leak specifico che hai visto su X\n\n"
+            "🔥 <b>/leak</b> - Intercetta gli ultimi leak di X (@Fut_Scoreboard, @FutSheriff, @AsyFutTrader) ed estrae i <b>6 giocatori Pre-Hype</b> PRIMA che finiscano in Trending su FUT.GG!\n\n"
+            "🧬 <b>/evo</b> - Entra nell'ultima Evoluzione di FUT.GG, legge Requisiti + Boost e trova le gemme nascoste ancora a scarto\n\n"
+            "🔮 <b>/simula [requisiti e boost]</b> - Incolla un leak appena uscito su X per avere subito i 6 nomi da comprare prima di tutti\n\n"
             "🧮 <b>/tassa 50000</b> - Calcola pareggio (5%) e profitto"
         )
         invia_telegram(menu, chat_id)
 
     elif comando == "/leak":
-        invia_telegram("🕵️‍♂️ <i>Estrazione post REALI con Data/Ora dai canali Leak + Verifica Evoluzioni e Prezzi su FUT.GG...</i>", chat_id)
-        leaks = leggi_leak_telegram_con_data_ora()
-        evoluzioni_attive, giocatori_caldi, dettagli_evo_futgg = leggi_dettagli_evo_e_trending_futgg()
+        invia_telegram("⚡ <i>Lettura diretta canali Leak (Bypass Jina) + Calcolo carte PRE-TRENDING prima della massa...</i>", chat_id)
+        leaks = leggi_leak_telegram_tramite_jina()
+        evoluzioni_attive, link_ultima_evo, dettaglio_ultima_evo = leggi_requisiti_e_boost_ultima_evo_futgg()
 
         if leaks:
-            blocco_leaks_reali = "\n".join([f"- [{x['data_ora']}] {x['canale']}: {x['testo']}" for x in leaks[-8:]])
+            blocco_leaks = "\n".join([f"- [{x['data_ora']}] {x['canale']}: {x['testo']}" for x in leaks[-6:]])
         else:
-            blocco_leaks_reali = "Nessun post estratto da Telegram web in questo istante."
+            blocco_leaks = "Cerca tramite Google Search gli ultimissimi tweet di @Fut_Scoreboard, @FutSheriff e @AsyFutTrader delle ultime ore."
 
         str_evo = ", ".join(evoluzioni_attive)
-        str_caldi = ", ".join(giocatori_caldi)
 
         prompt = (
-            f"ULTIMI POST REALI ESTRATTI CON DATA E ORA DAI LEAKER:\n{blocco_leaks_reali}\n\n"
-            f"EVOLUZIONI ATTUALMENTE RILEVATE SU FUT.GG: {str_evo}\n"
-            f"ESTRATTO PAGINA EVOLUZIONI FUT.GG:\n{dettagli_evo_futgg}\n\n"
-            f"GIOCATORI PIÙ CLICCATI ORA SU FUT.GG (TRENDING/MOMENTUM): {str_caldi}\n\n"
-            "ISTRUZIONI TASSATIVE:\n"
-            "1) Prima di tutto, descrivi in modo specifico QUALI sono gli ultimi leak o le ultime Evoluzioni reali presenti nei dati qui sopra "
-            "(o trovati tramite ricerca web delle ultime 24 ore), specificando per ciascuno: GIORNO E ORARIO del leak, REQUISITI ESATTI, "
-            "QUALI STATS (+Pace, +Shooting, +Dribbling, ecc.) e QUALI PLAYSTYLES va ad aggiungere.\n"
-            "2) Poi indica 5-6 CARTE REALI (Nome, Cognome, OVR, Club) tra quelle in Trending su FUT.GG o che entrano in questi requisiti.\n"
-            "3) USA SOLO PREZZI REALI DI MERCATO: se consigli una carta Oro Raro 78-82 OVR (come Nusa, Gruda, Gloukh, Neto), ricorda che il suo prezzo base è 700-1.500 crediti "
-            "e nell'hype di un'Evo sale tra 2.500 e 9.500 crediti (max price range 10.000). NON scrivere mai prezzi assurdi come 50.000 o 150.000 per una carta oro bassa!"
+            f"ULTIMI MESSAGGI INTERCETTATI DAI CANALI LEAK:\n{blocco_leaks}\n\n"
+            f"ULTIME EVOLUZIONI SU FUT.GG: {str_evo}\n"
+            f"DETTAGLIO REQUISITI E BOOST DELL'ULTIMA EVO ({link_ultima_evo}):\n{dettaglio_ultima_evo}\n\n"
+            "COMPITO CRITICO (ANTICIPARE IL TRENDING):\n"
+            "1) Riporta chiaramente l'ultimo leak di Evoluzione/SBC dai dati qui sopra (o dalla ricerca web delle ultime ore) con Data/Ora, Requisiti esatti, Stats e PlayStyles aggiunti.\n"
+            "2) NON DARE I GIOCATORI GIÀ IN TRENDING SU FUT.GG! Analizza tu i REQUISITI e i BOOST e trova nel database di EA FC 27 "
+            "6 CARTE SPECIFICHE (Nome, Cognome, OVR, Club) che non sono ancora esplose di prezzo ma che diventeranno le più desiderate "
+            "perché toccano il limite massimo dei requisiti, hanno già PlayStyles meta (Quick Step, Anticipate, Finesse Shot, Incisive Pass, Rapid, Technical) e ottimi link.\n"
+            "3) Indica il prezzo attuale pre-hype su PlayStation (es. 700-1.200 cr per Oro rari, 11k-18k per Inform/Speciali) e a quanto rivenderle quando finiranno in Trending."
         )
-        analisi = analizza_senza_allucinazioni(prompt)
+        analisi = anticipa_mercato_con_gemini(prompt)
 
-        msg = "🚨 <b>ULTIMI LEAK VERIFICATI (CON DATA/ORA, STATS & PLAYSTYLES):</b>\n\n"
+        msg = "🚨 <b>INTERCETTAZIONE LEAK & CARTE PRE-TRENDING (PRIMA DELLA MASSA):</b>\n\n"
         if leaks:
-            for item in leaks[-4:]:
+            for item in leaks[-3:]:
                 pulito = item["testo"].replace("<", "&lt;").replace(">", "&gt;")
                 msg += f"🕒 <b>{item['data_ora']} | {item['canale']}:</b>\n<i>{pulito[:220]}</i>\n\n"
-        else:
-            msg += "⚠️ <i>Canali Telegram temporaneamente schermati, analisi basata sui dati live estratti da FUT.GG:</i>\n\n"
-
         if evoluzioni_attive:
-            str_evo5 = ", ".join(evoluzioni_attive[:5])
-            msg += f"🧬 <b>Ultime Evo su FUT.GG:</b> <code>{str_evo5}</code>\n"
-        if giocatori_caldi:
-            str_caldi8 = ", ".join(giocatori_caldi[:8])
-            msg += f"📈 <b>Giocatori più cercati ora:</b> <code>{str_caldi8}</code>\n\n"
+            str_evo4 = ", ".join(evoluzioni_attive[:4])
+            msg += f"🧬 <b>Ultime Evo rilevate:</b> <code>{str_evo4}</code>\n\n"
 
-        msg += f"🎯 <b>DETTAGLIO LEAK (STATS/PLAYSTYLES) & CARTE REALI:</b>\n{analisi}"
+        msg += f"🔮 <b>CARTE DA COMPRARE PRIMA CHE VADANO IN TRENDING:</b>\n{analisi}"
         invia_telegram(msg, chat_id)
 
     elif comando == "/evo":
-        invia_telegram("🧬 <i>Lettura diretta delle Evoluzioni attive, Requisiti, Boost e Trending su FUT.GG...</i>", chat_id)
-        evoluzioni_attive, giocatori_caldi, dettagli_evo_futgg = leggi_dettagli_evo_e_trending_futgg()
-
+        invia_telegram("🧬 <i>Apertura ultima Evoluzione su FUT.GG: estrazione Requisiti, Boost e calcolo carte Pre-Hype...</i>", chat_id)
+        evoluzioni_attive, link_ultima_evo, dettaglio_ultima_evo = leggi_requisiti_e_boost_ultima_evo_futgg()
         str_evo = ", ".join(evoluzioni_attive)
-        str_caldi = ", ".join(giocatori_caldi)
 
         prompt = (
-            f"EVOLUZIONI RILEVATE SU FUT.GG: {str_evo}\n"
-            f"TESTO ESTRATTO DA FUT.GG EVOLUTIONS:\n{dettagli_evo_futgg}\n"
-            f"GIOCATORI IN TRENDING EVO SU FUT.GG: {str_caldi}\n\n"
-            "Per ciascuna delle ultime Evoluzioni elencate:\n"
-            "1) Specifica Nome dell'Evoluzione, Requisiti di ingresso, quali Stats e quali PlayStyles/PlayStyle+ aggiunge.\n"
-            "2) Indica i giocatori specifici (Nome, Cognome, OVR, Club) tra quelli in Trending su FUT.GG che ci entrano meglio.\n"
-            "3) Indica prezzi di acquisto e rivendita REALISTICI per PlayStation (ricorda che gli Oro <83 hanno tetto massimo a 10.000 crediti!)."
+            f"EVOLUZIONI ATTIVE SU FUT.GG: {str_evo}\n"
+            f"TESTO INTERNO DELL'ULTIMA EVOLUZIONE ({link_ultima_evo}):\n{dettaglio_ultima_evo}\n\n"
+            "1) Estrai i Requisiti esatti e i Boost (Stats + PlayStyles) dell'ultima Evoluzione.\n"
+            "2) Invece dei soliti giocatori già noti, trova 6 GIOCATORI SPECIFICI (Nome, Cognome, OVR, versione, Club) nel database di EA FC 27 "
+            "che entrano perfettamente nei requisiti, creano una combo devastante di PlayStyles Meta e alto Meta Rating su FUT.GG, "
+            "e sono ancora acquistabili a basso prezzo su PS per fare compravendita."
         )
-        consiglio = analizza_senza_allucinazioni(prompt)
-        str_evo6 = ", ".join(evoluzioni_attive[:6])
-        str_caldi10 = ", ".join(giocatori_caldi[:10])
+        consiglio = anticipa_mercato_con_gemini(prompt)
         msg = (
-            f"🔥 <b>REPORT EVOLUZIONI REALI FUT.GG:</b>\n\n"
-            f"🧬 <b>Evo attive:</b> <code>{str_evo6}</code>\n"
-            f"📈 <b>Trending Players:</b> <code>{str_caldi10}</code>\n\n"
-            f"🧠 <b>REQUISITI, BOOST STATS/PLAYSTYLES & CARTE DA COMPRARE:</b>\n{consiglio}\n\n"
-            f"🔗 <a href='https://www.fut.gg/evolutions/trending/'>Verifica Prezzi Live su FUT.GG Trending</a>"
+            f"🔥 <b>ANALISI PROFONDA ULTIMA EVO & GEMME PRE-HYPE:</b>\n\n"
+            f"🧬 <b>Ultime Evo:</b> <code>{str_evo}</code>\n\n"
+            f"🎯 <b>REQUISITI, BOOST & CARTE DA ANTICIPARE:</b>\n{consiglio}\n\n"
+            f"🔗 <a href='{link_ultima_evo or 'https://www.fut.gg/evolutions/'}'>Apri Ultima Evoluzione su FUT.GG</a>"
         )
         invia_telegram(msg, chat_id)
 
     elif comando == "/simula":
         if len(parti) < 2:
             invia_telegram(
-                "🔮 <b>SIMULATORE REQUISITI & BOOST</b>\n"
-                "Incolla il testo esatto di un leak visto su X:\n"
-                "<code>/simula Evo Max 82 OVR Max 86 PAC +6 PAC +8 SHO PlayStyle+ Finesse Shot</code>",
+                "🔮 <b>ANTICIPATORE MANUALE LEAK X</b>\n"
+                "Appena vedi un requisito leakato su X, scrivilo qui per avere i 6 nomi PRIMA che escano su FUT.GG:\n"
+                "<code>/simula Evo CC Max 82 OVR Max 84 PAC Boost +8 PAC +10 PAS PlayStyle+ Incisive Pass</code>",
                 chat_id
             )
             return
         leak_input = " ".join(parti[1:])
-        invia_telegram("🔮 <i>Analisi tecnica del leak e ricerca carte con prezzi reali...</i>", chat_id)
-        _, giocatori_caldi, _ = leggi_dettagli_evo_e_trending_futgg()
-        str_caldi = ", ".join(giocatori_caldi)
+        invia_telegram("🔮 <i>Calcolo combinazioni PlayStyles + Meta Rating per anticipare il Trending di FUT.GG...</i>", chat_id)
         prompt = (
-            f"L'utente ha fornito questo leak specifico: '{leak_input}'\n"
-            f"Giocatori attualmente caldi su FUT.GG: {str_caldi}\n"
-            "1) Riepiloga quali Stats e PlayStyles aggiunge questo leak e quali sono i limiti dei requisiti.\n"
-            "2) Indica 6 carte REALI (Nome, Cognome, OVR, versione e Club) che rispettano questi requisiti e combinano ottimi PlayStyles di base.\n"
-            "3) Indica i veri prezzi di mercato PS (650-2.000 cr per carte oro scarto, con target 3.500-9.500 cr nell'hype)."
+            f"NUOVO LEAK APPENA INSERITO: '{leak_input}'\n"
+            "Trova nel database di EA FC 27 i 6 GIOCATORI ESATTI (Nome, Cognome, OVR, versione e Club) che:\n"
+            "• Toccano il limite massimo dei requisiti indicati nel leak.\n"
+            "• Hanno già PlayStyles in meta che combinati con questo boost li porteranno in cima al Meta Rating di FUT.GG.\n"
+            "• Indica prezzo di acquisto immediato pre-hype su PlayStation e target di rivendita quando la community li scoprirà."
         )
-        risp = analizza_senza_allucinazioni(prompt)
-        invia_telegram(f"🎯 <b>SIMULAZIONE TECNICA DEL LEAK:</b>\n\n{risp}", chat_id)
+        risp = anticipa_mercato_con_gemini(prompt)
+        invia_telegram(f"🎯 <b>CARTE DA COMPRARE SUBITO (PRE-TRENDING):</b>\n\n{risp}", chat_id)
 
     elif comando == "/tassa":
         if len(parti) < 2:
@@ -361,12 +357,12 @@ def gestisci_comando(testo_msg, chat_id):
 
     elif comando == "/chiedi":
         if len(parti) < 2:
-            invia_telegram("Scrivi una domanda! Es: <code>/chiedi quanto vale Pedro Neto oro e in quale Evo entra?</code>", chat_id)
+            invia_telegram("Scrivi una domanda! Es: <code>/chiedi migliori DC 81-82 OVR con Anticipo da comprare a scarto per future Evo?</code>", chat_id)
             return
         domanda = " ".join(parti[1:])
-        invia_telegram("🧠 <i>Verifica dati reali in corso...</i>", chat_id)
-        risp = analizza_senza_allucinazioni(domanda)
-        invia_telegram(f"🤖 <b>RISPOSTA VERIFICATA:</b>\n\n{risp}", chat_id)
+        invia_telegram("🧠 <i>Ricerca gemme nascoste nel database FC 27...</i>", chat_id)
+        risp = anticipa_mercato_con_gemini(domanda)
+        invia_telegram(f"🤖 <b>ANALISTA PRE-HYPE:</b>\n\n{risp}", chat_id)
 
 def ascolta_comandi_telegram():
     global ultimo_update_id
@@ -398,52 +394,68 @@ def ascolta_comandi_telegram():
         except Exception:
             time.sleep(3)
 
-def scansiona_e_simula_h24():
-    global messaggi_gia_visti
-    leaks = leggi_leak_telegram_con_data_ora()
+# ================= MONITORAGGIO H24 PER ANTICIPARE IL MERCATO =================
+def scansiona_e_anticipa_h24():
+    """Controlla ogni 60 secondi sia i nuovi Leak su Telegram (via Jina) sia l'uscita di una nuova Evo su FUT.GG."""
+    global messaggi_gia_visti, evo_gia_viste
+
+    # 1. Controlla se è uscito un nuovo post sui canali Leak
+    leaks = leggi_leak_telegram_tramite_jina()
     for item in leaks:
         txt = item["testo"]
-        id_msg = hash(txt[:85])
+        id_msg = hash(txt[:80])
         if id_msg not in messaggi_gia_visti:
             messaggi_gia_visti.add(id_msg)
             if any(k in txt.lower() for k in PAROLE_TRIGGER):
-                if len(messaggi_gia_visti) > 6:
-                    _, giocatori_caldi, _ = leggi_dettagli_evo_e_trending_futgg()
-                    str_caldi8 = ", ".join(giocatori_caldi[:8])
-                    analisi = analizza_senza_allucinazioni(
-                        f"NUOVO LEAK APPENA PUBBLICATO:\n"
-                        f"Fonte: {item['canale']} | Data e Ora: {item['data_ora']}\n"
-                        f"Testo del Leak: '{txt}'\n"
-                        f"Giocatori attualmente in Trending su FUT.GG: {str_caldi8}\n\n"
-                        "1) Spiega esattamente di quale leak si tratta, riportando Data/Ora, quali Stats e quali PlayStyles aggiunge e i requisiti.\n"
-                        "2) Indica 5-6 carte specifiche (Nome, Cognome, OVR, Club) che entrano in questi requisiti.\n"
-                        "3) Indica prezzi REALISTICI di mercato su PS (senza inventare cifre fuori Price Range)."
+                if len(messaggi_gia_visti) > 5:
+                    analisi = anticipa_mercato_con_gemini(
+                        f"NUOVO LEAK APPENA USCITO DA {item['canale']} ({item['data_ora']}):\n'{txt}'\n\n"
+                        "NON GUARDARE I TRENDING ATTUALI. Analizza subito i requisiti e i boost di questo leak e trova "
+                        "nel database di EA FC 27 le 6 CARTE SPECIFICHE (Nome, Cognome, OVR, Club) con i migliori PlayStyles Meta "
+                        "da comprare ADESSO a prezzo basso PRIMA che vadano in Trending su FUT.GG!"
                     )
-                    pulito = txt[:350].replace("<", "&lt;").replace(">", "&gt;")
+                    pulito = txt[:340].replace("<", "&lt;").replace(">", "&gt;")
                     notifica = (
-                        f"🚨 <b>NUOVO LEAK IN TEMPO REALE!</b>\n"
-                        f"🕒 <b>{item['data_ora']} | Fonte: {item['canale']}</b>\n\n"
+                        f"🚨 <b>NUOVO LEAK INTERCETTATO AL SECONDO ZERO!</b>\n"
+                        f"🕒 <b>{item['data_ora']} | {item['canale']}</b>\n\n"
                         f"📝 <i>{pulito}</i>\n\n"
-                        f"🎯 <b>DETTAGLIO STATS/PLAYSTYLES & CARTE DA COMPRARE:</b>\n{analisi}\n\n"
-                        f"🔗 <a href='https://www.fut.gg/evolutions/trending/'>Controlla Prezzi Reali su FUT.GG</a>"
+                        f"🔮 <b>CARTE DA COMPRARE PRIMA CHE VADANO IN TRENDING:</b>\n{analisi}"
                     )
                     invia_telegram(notifica)
 
+    # 2. Controlla se è appena apparsa una nuova Evoluzione su FUT.GG (es. alle 19:00)
+    evoluzioni_attive, link_prima, dettaglio_prima = leggi_requisiti_e_boost_ultima_evo_futgg()
+    for nome_evo in evoluzioni_attive:
+        if nome_evo not in evo_gia_viste:
+            evo_gia_viste.add(nome_evo)
+            if len(evo_gia_viste) > 6:
+                analisi_evo = anticipa_mercato_con_gemini(
+                    f"È APPENA USCITA UNA NUOVA EVOLUZIONE SU FUT.GG: {nome_evo}\n"
+                    f"Dettagli estratti dalla pagina:\n{dettaglio_prima}\n\n"
+                    "Individua subito 6 CARTE SPECIFICHE (Nome, Cognome, OVR, Club) che entrano in questi requisiti "
+                    "PRIMA che la community le faccia salire in Trending!"
+                )
+                invia_telegram(
+                    f"🔥 <b>NUOVA EVOLUZIONE APPENA CARICATA SU FUT.GG: {nome_evo}!</b>\n\n"
+                    f"🎯 <b>CARTE DA COMPRARE SUBITO (PRE-TRENDING):</b>\n{analisi_evo}\n\n"
+                    f"🔗 <a href='{link_prima}'>Apri {nome_evo} su FUT.GG</a>"
+                )
+
 def motore_h24():
     avvio = (
-        "🛡️ <b>BOT AGGIORNATO: MODALITÀ 'DATI REALI, DATA/ORA LEAK & PREZZI VERI'!</b>\n\n"
-        "• Aggiunta estrazione di <b>Giorno e Orario esatto</b> di ogni leak.\n"
-        "• Dettaglio obbligatorio di <b>quali Stats e quali PlayStyles</b> aggiunge il leak.\n"
-        "• <b>Blocco Anti-Allucinazione</b> sui prezzi (rispetto dei Price Range reali: Oro 75-82 tra 700 e 10k crediti!).\n\n"
-        "Scrivi subito <b>/leak</b> o <b>/evo</b> per testarlo!"
+        "⚡ <b>BOT AGGIORNATO: MODALITÀ 'ANTICIPA IL TRENDING (PRE-HYPE)'!</b>\n\n"
+        "• Rimossa la copia dei giocatori già in Trending.\n"
+        "• Attivato lettore Jina anche sui canali Telegram dei Leaker per non essere mai schermati da Render.\n"
+        "• Estrazione profonda dei Requisiti dell'ultima Evo e ricerca delle <b>carte dormienti (a prezzo di scarto)</b> prima che la massa le compri.\n\n"
+        "Prova subito <b>/leak</b> oppure <b>/evo</b>!"
     )
     invia_telegram(avvio)
-    scansiona_e_simula_h24()
+    scansiona_e_anticipa_h24()
     ultimo_orario = ""
 
     while True:
         try:
-            scansiona_e_simula_h24()
+            scansiona_e_anticipa_h24()
             tz_it = timezone(timedelta(hours=2))
             now = datetime.now(tz_it)
             ora_str = now.strftime("%H:%M")
@@ -462,7 +474,7 @@ def motore_h24():
 
 @app.route("/")
 def home():
-    return "FC 27 Verified Leak & Price Bot Running!"
+    return "FC 27 Pre-Trending Leak Interceptor Running!"
 
 threading.Thread(target=motore_h24, daemon=True).start()
 threading.Thread(target=ascolta_comandi_telegram, daemon=True).start()
