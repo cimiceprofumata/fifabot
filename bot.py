@@ -48,7 +48,9 @@ SPAM_WORDS = [
     "send message",
     "tg://resolve",
     "context",
-    "embed"
+    "embed",
+    "log in",
+    "sign up"
 ]
 
 TRIGGERS = [
@@ -115,13 +117,13 @@ def scarica_jina(target_url):
         h = dict(HEADERS)
         h["X-No-Cache"] = "true"
         resp = requests.get(f"https://r.jina.ai/{target_url}", headers=h, timeout=18)
-        if resp.status_code == 200 and len(resp.text) > 200:
+        if resp.status_code == 200 and len(resp.text) > 150:
             return resp.text
     except Exception:
         pass
     return ""
 
-def pulisci_righe(raw_text, min_len=20):
+def pulisci_righe(raw_text, min_len=15):
     buone = []
     for r in raw_text.split("\n"):
         rc = r.strip()
@@ -142,21 +144,21 @@ def leggi_leak_live():
     tz_it = timezone(timedelta(hours=2))
     ora_str = datetime.now(tz_it).strftime("%d/%m %H:%M")
 
+    # 1. Canali Telegram pubblici (più stabili da leggere)
+    for can in CANALI_TG:
+        raw_tg = scarica_jina(f"https://t.me/s/{can}")
+        righe = pulisci_righe(raw_tg, 25)
+        for post in righe[-4:]:
+            if any(k in post.lower() for k in TRIGGERS):
+                raccolta.append(f"[{ora_str} | @{can} TG]: {post[:320]}")
+
+    # 2. Profili X Leakers
     for u in PROFILI_X[:4]:
         handle = u.split("/")[-1]
-        righe = pulisci_righe(scarica_jina(u), 35)
-        for linea in righe:
-            ll = linea.lower()
-            if any(k in ll for k in TRIGGERS):
-                if "log in" not in ll and "sign up" not in ll:
-                    raccolta.append(f"[{ora_str} @{handle}]: {linea[:280]}")
-
-    for can in CANALI_TG:
-        righe = pulisci_righe(scarica_jina(f"https://t.me/s/{can}"), 30)
-        ultime = righe[-3:]
-        for post in ultime:
-            if any(k in post.lower() for k in TRIGGERS):
-                raccolta.append(f"[{ora_str} @{can}]: {post[:280]}")
+        righe_x = pulisci_righe(scarica_jina(u), 30)
+        for linea in righe_x[-5:]:
+            if any(k in linea.lower() for k in TRIGGERS):
+                raccolta.append(f"[{ora_str} | @{handle} X]: {linea[:320]}")
 
     return raccolta[:10]
 
@@ -169,86 +171,90 @@ def estrai_max_ovr(testo):
         return int(m2.group(1))
     return 80
 
-def scarica_futgg(max_ovr=80):
+def apri_schede_reali_giocatori_futgg(max_ovr=80):
+    """
+    1) Legge l'ultima Evoluzione reale su FUT.GG con i suoi veri Requisiti e Boost.
+    2) Prende i giocatori dal filtro OVR <= max_ovr su FUT.GG e APRE LE SINGOLE PAGINE
+       di 6 giocatori per leggere i VERI PlayStyles, il VERO Club FC 27 e il VERO GG Rating!
+    """
     blocchi = []
-    min_o = max_ovr - 3
+
+    # A. Legge le Evoluzioni reali attive su FUT.GG e apre la prima per avere i dettagli veri
+    raw_evos = scarica_jina("https://www.fut.gg/evolutions/")
+    righe_evos = pulisci_righe(raw_evos, 12)
+    if righe_evos:
+        blocchi.append("=== EVOLUZIONI REALI ATTIVE SU FUT.GG ===\n" + "\n".join(righe_evos[:30]))
+
+    links_evo = re.findall(r"(/evolutions/\d+-[a-zA-Z0-9-]+/)", raw_evos)
+    if links_evo:
+        prima_evo_url = f"https://www.fut.gg{links_evo[0]}"
+        raw_prima_evo = scarica_jina(prima_evo_url)
+        righe_pe = pulisci_righe(raw_prima_evo, 10)
+        if righe_pe:
+            blocchi.append(
+                f"=== DETTAGLI REQUISITI E BOOST ULTIMA EVO ({prima_evo_url}) ===\n"
+                + "\n".join(righe_pe[:35])
+            )
+
+    # B. Cerca i giocatori nel database FUT.GG con OVR tra (max_ovr - 2) e max_ovr
+    min_o = max_ovr - 2
     u_db = f"https://www.fut.gg/players/?overall__lte={max_ovr}&overall__gte={min_o}"
-    r_db = pulisci_righe(scarica_jina(u_db), 12)
-    if r_db:
-        blocchi.append("=== DB FUT.GG ===\n" + "\n".join(r_db[:50]))
+    raw_db = scarica_jina(u_db)
 
-    r_best = pulisci_righe(scarica_jina("https://www.fut.gg/evolutions/best/"), 15)
-    if r_best:
-        blocchi.append("=== BEST EVO ===\n" + "\n".join(r_best[:35]))
+    # Estrae i link alle pagine singole dei giocatori (es. /players/12345-nome/27-67890/)
+    player_urls = re.findall(r"(/players/\d+-[a-zA-Z0-9-]+(?:/\d+-\d+)?/)", raw_db)
+    visti = []
+    for pu in player_urls:
+        slug_base = "/".join(pu.split("/")[:3])
+        if slug_base not in visti:
+            visti.append(slug_base)
 
-    r_evos = pulisci_righe(scarica_jina("https://www.fut.gg/evolutions/"), 15)
-    if r_evos:
-        blocchi.append("=== EVOS ===\n" + "\n".join(r_evos[:30]))
+    # C. Apre le pagine singole dei primi 6 giocatori per leggere PlayStyles e GG Rating reali!
+    schede_complete = []
+    for pu in visti[:6]:
+        full_p_url = f"https://www.fut.gg{pu}"
+        raw_scheda = scarica_jina(full_p_url)
+        righe_s = pulisci_righe(raw_scheda, 8)
+        if righe_s:
+            testo_scheda = " | ".join(righe_s[:28])
+            schede_complete.append(f"SCHEDA REALE FUT.GG ({full_p_url}):\n{testo_scheda[:600]}")
+
+    if schede_complete:
+        blocchi.append(
+            f"=== SCHEDE COMPLETE GIOCATORI (OVR <= {max_ovr}) LETTE DA FUT.GG ===\n"
+            + "\n\n".join(schede_complete)
+        )
+    else:
+        r_db = pulisci_righe(raw_db, 10)
+        blocchi.append("=== ELENCO GIOCATORI FUT.GG ===\n" + "\n".join(r_db[:40]))
 
     return "\n\n".join(blocchi)
 
-def filtra_errori_ia(testo_ia, max_ovr_lim=None):
-    paragrafi = testo_ia.split("\n\n")
-    validi = []
-
-    for p in paragrafi:
-        pl = p.lower()
-        if "ruolo: gk" in pl or "nota di sicurezza" in pl:
-            continue
-
-        if max_ovr_lim:
-            ovrs = re.findall(r"(?:ovr|overall)[^0-9]{0,25}(\d{2})", pl)
-            ovrs += re.findall(r"\b(\d{2})\s*ovr\b", pl)
-            sfora = False
-            for val in ovrs:
-                num = int(val)
-                if num > max_ovr_lim and "post" not in pl and "dopo" not in pl:
-                    sfora = True
-            if sfora:
-                continue
-
-        spec_w = ["totw", "inform", "promo", "special", "hero", "icon", "rush"]
-        if not any(s in pl for s in spec_w):
-            if re.search(r"\b([1-9]\d|[1-9]\d{2})\.000\b", p):
-                nuove = []
-                for r in p.split("\n"):
-                    rl = r.lower()
-                    if "prezzo" in rl or "target" in rl or "acquisto" in rl:
-                        nuove.append(
-                            "• Prezzo PS (Oro <=82): Compra 750-1.300 cr | "
-                            "Target Hype: 3.800-8.500 cr (Max Range 10k)"
-                        )
-                    else:
-                        nuove.append(r)
-                p = "\n".join(nuove)
-
-        validi.append(p)
-
-    return "\n\n".join(validi)
-
-def analizza_futgg(prompt_u, max_ovr_f=None):
+def analizza_senza_inventare(prompt_u, max_ovr_f=80):
     global modello_scoperto
     if not GEMINI_API_KEY:
         return "⚠️ GEMINI_API_KEY mancante."
 
     tz_it = timezone(timedelta(hours=2))
     oggi = datetime.now(tz_it).strftime("%d/%m/%Y %H:%M")
-    lim_s = str(max_ovr_f) if max_ovr_f else "80"
 
     sys_l = [
         f"Data: {oggi} (EA Sports FC 27, PS).",
-        "REGOLE INDEROGABILI:",
-        f"1) MAX {lim_s} OVR: Vietato citare carte con OVR > {lim_s}!",
-        "2) Nessun portiere (GK).",
-        "3) Verifica su site:fut.gg Club 2026/27, GG Rating e Max PlayStyles.",
-        "4) Le carte Oro <=82 costano 700-1.400 cr (Max Price Range EA: 10.000 cr).",
-        "5) Per ogni carta (separa ogni giocatore con riga vuota):",
-        "• Nome Cognome | Ruolo | OVR in FC 27 | Club in FC 27",
-        "• GG Rating FUT.GG + Numero e lista PlayStyles",
-        "• Prezzo Acquisto PS -> Target Rivendita.",
-        "Niente asterischi (*) o cancelletti (#)."
+        "SEI OBBLIGATO A SEGUIRE QUESTE REGOLE CONTRO LE ALLUCINAZIONI:",
+        "1) NON INVENTARE MAI NULLA: È SEVERAMENTE VIETATO usare la tua memoria per indovinare Overall, Club, GG Rating o PlayStyles!",
+        "2) USA SOLO LE SCHEDE REALI FORNITE SOTTO: Puoi elencare SOLO i giocatori di cui vedi la 'SCHEDA REALE FUT.GG' nei dati qui sotto.",
+        "3) SE UN DATO NON C'È SCRITTO NELLA SCHEDA ESTRATTA (es. se nella scheda non vedi scritto il numero del GG Rating o i PlayStyles), "
+        "DEVI SCRIVERE 'Dato non visibile nella pagina estratta' — NON INVENTARE MAI NUMERI COME 81.5 O PLAYSTYLES A CASO!",
+        "4) NON SOMMARE I PLAYSTYLES DEL LEAK A QUELLI DELLA CARTA SENZA DIRLO: "
+        "Scrivi separatamente 'PlayStyles Base attuali sulla carta' e 'Boost aggiunto dall'Evo'.",
+        "5) ALL'INIZIO DI OGNI RISPOSTA DEVI SEMPRE INSERIRE QUESTO BLOCCO OBBLIGATORIO:",
+        "📋 DETTAGLI DEL LEAK / EVO DI RIFERIMENTO:",
+        "• Fonte e Orario: [indica esattamente quale post/leak o quale Evoluzione reale di FUT.GG stai usando]",
+        "• Requisiti di Ingresso: [Max OVR, Ruolo, Max PlayStyles base, Max PS+]",
+        "• Boost dell'Evo: [Statistiche aggiunte + nuovi PlayStyles/PS+ aggiunti]",
+        f"6) Controlla che ogni carta consigliata abbia OVR <= {max_ovr_f}. Non usare asterischi (*) o cancelletti (#)."
     ]
-    full_p = "\n".join(sys_l) + "\n\nDATI:\n" + prompt_u
+    full_p = "\n".join(sys_l) + "\n\nDATI REALI SCARICATI ORA DA FUT.GG E LEAKER:\n" + prompt_u
     base_u = "https://generativelanguage.googleapis.com/v1beta/models"
     err = "Nessuna risposta"
 
@@ -274,8 +280,7 @@ def analizza_futgg(prompt_u, max_ovr_f=None):
                 if out:
                     modello_scoperto = mod
                     out = out.replace("**", "").replace("*", "•").replace("#", "")
-                    out = out.replace("<", "&lt;").replace(">", "&gt;")
-                    return filtra_errori_ia(out, max_ovr_lim=max_ovr_f)
+                    return out.replace("<", "&lt;").replace(">", "&gt;")
             except Exception as e:
                 err = str(e)
     return f"⚠️ Errore IA: {err[:120]}"
@@ -289,53 +294,69 @@ def gestisci_comando(testo_msg, chat_id):
     if cmd in ["/start", "/help", "/menu"]:
         utenti_iscritti.add(str(chat_id))
         m_lines = [
-            "🎯 <b>BOT SNIPER EA FC 27 (FILTRO OVR & MULTI-UTENTE)</b>",
+            "🎯 <b>BOT SNIPER EA FC 27 (SCHEDE SINGOLE FUT.GG & ZERO INVENZIONI)</b>",
             f"👥 <i>Utenti collegati H24: {len(utenti_iscritti)}</i>\n",
-            "🔥 <b>/leak</b> - Leak X + Carte FUT.GG filtrate per OVR e PlayStyles",
-            "🔮 <b>/simula [req]</b> - Es: <code>/simula Evo LB RB Max 80 OVR</code>",
-            "🧬 <b>/evo</b> - Migliori Evoluzioni FUT.GG per GG Rating",
+            "🔥 <b>/leak</b> - Mostra i dettagli del leak di riferimento + apre le schede singole su FUT.GG",
+            "🔮 <b>/simula [req]</b> - Es: <code>/simula Evo LB RB Max 80 OVR Max 6 PlayStyles Boost +4 DEF +PlayStyle+ Intercept</code>",
+            "🧬 <b>/evo</b> - Legge l'ultima Evoluzione reale su FUT.GG con Requisiti e Boost",
             "🧮 <b>/tassa 50000</b> - Calcola pareggio (5%) e profitto"
         ]
         invia_telegram("\n".join(m_lines), chat_id)
 
     elif cmd in ["/leak", "/evo"]:
-        invia_telegram("🕵️‍♂️ <i>Scansione Leak + Filtro FUT.GG in corso...</i>", chat_id)
+        invia_telegram(
+            "🕵️‍♂️ <i>Apertura schede singole giocatori su FUT.GG e lettura dettagli Leak/Evo in corso (richiede circa 15-20 secondi)...</i>",
+            chat_id
+        )
         leaks = leggi_leak_live()
         t_leaks = "\n".join(leaks)
         m_ovr = estrai_max_ovr(t_leaks) if leaks else 80
-        d_fut = scarica_futgg(max_ovr=m_ovr)
-        b_lk = t_leaks if leaks else "Cerca su X i leak di oggi (Evo LB/RB Max 80)."
+        dati_schede = apri_schede_reali_giocatori_futgg(max_ovr=m_ovr)
+
+        b_lk = t_leaks if leaks else "Nessun post testuale nuovo letto da Telegram/X in questo minuto. Usa l'ultima Evoluzione reale estratta da FUT.GG qui sotto."
 
         p_lines = [
-            f"LEAK:\n{b_lk}\n",
-            f"FUT.GG (OVR <= {m_ovr}):\n{d_fut[:2500]}\n",
-            f"Elenca 6 carte REALI di FC 27 con OVR <= {m_ovr} (VIETATO OVR > {m_ovr}), ",
-            "con Club 2026/27, GG Rating, numero PlayStyles e prezzi PS."
+            f"POST LEAK INTERCETTATI:\n{b_lk}\n",
+            f"DATI E SCHEDE SINGOLE ESTRATTE DA FUT.GG (OVR <= {m_ovr}):\n{dati_schede[:3200]}\n",
+            "ISTRUZIONI:",
+            "1) Compila prima il blocco obbligatorio '📋 DETTAGLI DEL LEAK / EVO DI RIFERIMENTO' riportando esattamente la fonte, i requisiti e i boost letti nei dati qui sopra.",
+            "2) Elenca SOLO i giocatori presenti nelle 'SCHEDE COMPLETE GIOCATORI LETTE DA FUT.GG' qui sopra.",
+            "3) Per ciascuno riporta SOLO i PlayStyles, il Club, l'OVR e il GG Rating scritti testualmente nella sua scheda (senza inventare nessun numero!)."
         ]
-        analisi = analizza_futgg("\n".join(p_lines), max_ovr_f=m_ovr)
+        analisi = analizza_senza_inventare("\n".join(p_lines), max_ovr_f=m_ovr)
 
-        msg = f"🚨 <b>REPORT FUT.GG (FILTRO OVR &lt;= {m_ovr}):</b>\n\n"
-        for lk in leaks[:2]:
-            pul = lk.replace("<", "&lt;").replace(">", "&gt;")
-            msg += f"📢 <i>{pul[:200]}</i>\n\n"
-        msg += f"🎯 <b>CARTE VERIFICATE:</b>\n{analisi}"
+        msg = f"🚨 <b>REPORT VERIFICATO (CON DETTAGLI LEAK & SCHEDE SINGOLE FUT.GG):</b>\n\n"
+        if leaks:
+            for lk in leaks[:2]:
+                pul = lk.replace("<", "&lt;").replace(">", "&gt;")
+                msg += f"📢 <i>{pul[:220]}</i>\n\n"
+        msg += f"{analisi}\n\n"
+        msg += f"🔗 <a href='https://www.fut.gg/players/?overall__lte={m_ovr}'>Verifica su FUT.GG (OVR &lt;= {m_ovr})</a>"
         invia_telegram(msg, chat_id)
 
     elif cmd == "/simula":
         if len(parti) < 2:
-            invia_telegram("Usa: <code>/simula Evo LB RB Max 80 OVR</code>", chat_id)
+            invia_telegram(
+                "🔮 Incolla i dettagli del leak! Es:\n"
+                "<code>/simula Leak FutSheriff Evo LB RB Max 80 OVR Max 6 PlayStyles Boost +4 OVR +PlayStyle+ Intercept</code>",
+                chat_id
+            )
             return
         q_in = " ".join(parti[1:])
         m_ovr = estrai_max_ovr(q_in)
-        invia_telegram(f"🔮 <i>Filtro FUT.GG per OVR &lt;= {m_ovr}...</i>", chat_id)
-        d_fut = scarica_futgg(max_ovr=m_ovr)
-        p_sim = (
-            f"Simula leak FC 27: '{q_in}' (MAX OVR <= {m_ovr}).\n"
-            f"Dati FUT.GG:\n{d_fut[:2300]}\n"
-            f"Trova 6 carte REALI di FC 27 con OVR <= {m_ovr}, ordinate per GG Rating."
+        invia_telegram(
+            f"🔮 <i>Apertura schede giocatori OVR &lt;= {m_ovr} su FUT.GG per simulare il leak...</i>",
+            chat_id
         )
-        risp = analizza_futgg(p_sim, max_ovr_f=m_ovr)
-        invia_telegram(f"🎯 <b>SIMULAZIONE (MAX {m_ovr} OVR):</b>\n\n{risp}", chat_id)
+        dati_schede = apri_schede_reali_giocatori_futgg(max_ovr=m_ovr)
+        p_sim = (
+            f"LEAK DI RIFERIMENTO FORNITO DALL'UTENTE:\n'{q_in}'\n\n"
+            f"SCHEDE GIOCATORI ESTRATTE DA FUT.GG (OVR <= {m_ovr}):\n{dati_schede[:3000]}\n\n"
+            "1) Stampa all'inizio tutti i dettagli del leak di riferimento fornito dall'utente.\n"
+            "2) Analizza le carte estratte dalle schede reali di FUT.GG qui sopra senza inventare PlayStyles o GG Rating non presenti nel testo!"
+        )
+        risp = analizza_senza_inventare(p_sim, max_ovr_f=m_ovr)
+        invia_telegram(f"🎯 <b>SIMULAZIONE CON DETTAGLI LEAK (MAX {m_ovr} OVR):</b>\n\n{risp}", chat_id)
 
     elif cmd == "/tassa":
         if len(parti) < 2:
@@ -357,14 +378,14 @@ def gestisci_comando(testo_msg, chat_id):
 
     elif cmd == "/chiedi":
         if len(parti) < 2:
-            invia_telegram("Es: <code>/chiedi terzini max 80 FC 27?</code>", chat_id)
+            invia_telegram("Es: <code>/chiedi dettagli ultima evo su fut.gg</code>", chat_id)
             return
         dom = " ".join(parti[1:])
-        m_ovr = estrai_max_ovr(dom) if "max" in dom.lower() else None
-        invia_telegram("🧠 <i>Verifica FUT.GG...</i>", chat_id)
-        d_fut = scarica_futgg(max_ovr=m_ovr or 82)
-        risp = analizza_futgg(f"Domanda: {dom}\n{d_fut[:2000]}", max_ovr_f=m_ovr)
-        invia_telegram(f"🤖 <b>RISPOSTA FUT.GG:</b>\n\n{risp}", chat_id)
+        m_ovr = estrai_max_ovr(dom) if "max" in dom.lower() else 82
+        invia_telegram("🧠 <i>Lettura schede FUT.GG...</i>", chat_id)
+        dati_schede = apri_schede_reali_giocatori_futgg(max_ovr=m_ovr)
+        risp = analizza_senza_inventare(f"Domanda: {dom}\n\n{dati_schede[:2500]}", max_ovr_f=m_ovr)
+        invia_telegram(f"🤖 <b>RISPOSTA VERIFICATA FUT.GG:</b>\n\n{risp}", chat_id)
 
 def ascolta_comandi():
     global ultimo_update_id
@@ -401,16 +422,21 @@ def scansiona_h24():
             messaggi_gia_visti.add(id_lk)
             if len(messaggi_gia_visti) > 4:
                 m_ovr = estrai_max_ovr(lk)
-                d_fut = scarica_futgg(max_ovr=m_ovr)
-                p_h24 = f"NUOVO LEAK: {lk}\nFUT.GG:\n{d_fut[:1800]}\nTrova 6 carte OVR <= {m_ovr}!"
-                analisi = analizza_futgg(p_h24, max_ovr_f=m_ovr)
+                dati_schede = apri_schede_reali_giocatori_futgg(max_ovr=m_ovr)
+                p_h24 = (
+                    f"NUOVO LEAK APPENA INTERCETTATO:\n{lk}\n\n"
+                    f"SCHEDE FUT.GG (OVR <= {m_ovr}):\n{dati_schede[:2500]}\n\n"
+                    "Stampa prima il blocco '📋 DETTAGLI DEL LEAK DI RIFERIMENTO' e poi le carte lette dalle schede FUT.GG!"
+                )
+                analisi = analizza_senza_inventare(p_h24, max_ovr_f=m_ovr)
                 pul = lk.replace("<", "&lt;").replace(">", "&gt;")
-                invia_telegram(f"🚨 <b>NUOVO LEAK!</b>\n<i>{pul}</i>\n\n{analisi}")
+                invia_telegram(f"🚨 <b>NUOVO LEAK RILEVATO!</b>\n📢 <i>{pul}</i>\n\n{analisi}")
 
 def motore_h24():
     invia_telegram(
-        "✅ <b>BOT ONLINE: FILTRO OVR MATEMATICO + CONDIVISIONE AMICI ATTIVA!</b>\n"
-        "Prova subito <b>/leak</b> o <b>/simula Evo LB RB Max 80 OVR</b>!"
+        "🛡️ <b>BOT AGGIORNATO: DETTAGLI LEAK SEMPRE VISIBILI + APERTURA SCHEDE SINGOLE FUT.GG!</b>\n"
+        "• Ora il bot apre le pagine singole dei giocatori su FUT.GG per leggere i veri PlayStyles e vieta a Gemini di inventare numeri non presenti.\n"
+        "• Ogni risposta inizia sempre con la scheda completa del Leak di riferimento usato!"
     )
     scansiona_h24()
     ult_ora = ""
@@ -427,7 +453,7 @@ def motore_h24():
 
 @app.route("/")
 def home():
-    return "FC 27 Bot OK!"
+    return "FC 27 Single-Card Verified Scraper Running!"
 
 threading.Thread(target=motore_h24, daemon=True).start()
 threading.Thread(target=ascolta_comandi, daemon=True).start()
