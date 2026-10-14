@@ -14,14 +14,12 @@ TELEGRAM_CHAT_ID = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
 GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or "").strip()
 EA_TAX = 0.05
 
-# Canali con anteprima web pubblica reale (t.me/s/)
 CANALI_TELEGRAM_APERTI = [
     "Fut_Scoreboard",
     "fifatradingromania",
     "futpoliceleaks"
 ]
 
-# Frasi di sistema di Telegram da BLOCCARE SEMPRE (così non legge i banner di iscrizione)
 FRASI_SPAZZATURA_TELEGRAM = [
     "if you have telegram",
     "you can contact",
@@ -88,7 +86,6 @@ def trova_modelli_attivi():
     return modelli
 
 def scarica_testo_jina(target_url):
-    """Legge le pagine di FUT.GG e Telegram superando Cloudflare senza cache."""
     try:
         h = dict(HEADERS)
         h["X-No-Cache"] = "true"
@@ -100,7 +97,6 @@ def scarica_testo_jina(target_url):
     return ""
 
 def leggi_post_reali_telegram():
-    """Legge SOLO veri post di testo dai canali Telegram e scarta qualsiasi avviso 'If you have Telegram...'."""
     raccolta = []
     tz_it = timezone(timedelta(hours=2))
     oggi_str = datetime.now(tz_it).strftime("%d/%m/%Y")
@@ -132,14 +128,9 @@ def leggi_post_reali_telegram():
     return raccolta
 
 def estrai_database_reale_fc27_da_futgg():
-    """
-    Entra direttamente su FUT.GG (Database EA FC 27), legge le ultime Evoluzioni uscite,
-    apre le prime 2 Evoluzioni ed estrae i requisiti, i boost e i GIOCATORI REALI di FC 27 compatibili!
-    """
     pagina_evo = scarica_testo_jina("https://www.fut.gg/evolutions/")
     pagina_players = scarica_testo_jina("https://www.fut.gg/players/")
 
-    # 1. Trova gli URL e i nomi delle ultime Evoluzioni di FC 27
     evo_trovate = []
     matches_evo = re.findall(r"(/evolutions/(\d+-[a-zA-Z0-9-]+)/)", pagina_evo)
     visti_slug = set()
@@ -149,7 +140,6 @@ def estrai_database_reale_fc27_da_futgg():
             nome_pulito = slug.split("-", 1)[-1].replace("-", " ").title()
             evo_trovate.append((nome_pulito, f"https://www.fut.gg{path_completo}"))
 
-    # 2. Entra nelle prime 2 Evoluzioni su FUT.GG per leggere Requisiti, Boost e i Giocatori di FC 27 che ci entrano
     dettagli_evo_estratti = []
     giocatori_db_fc27 = []
 
@@ -158,7 +148,6 @@ def estrai_database_reale_fc27_da_futgg():
         if not testo_evo:
             continue
 
-        # Estrae i giocatori del database FC 27 elencati dentro quella specifica Evoluzione
         player_matches = re.findall(r"/players/\d+-([a-zA-Z0-9-]+)/", testo_evo)
         nomi_in_questa_evo = []
         for p_slug in player_matches:
@@ -168,21 +157,21 @@ def estrai_database_reale_fc27_da_futgg():
             if nome_p not in giocatori_db_fc27:
                 giocatori_db_fc27.append(nome_p)
 
-        # Estrae le righe di testo con i Requisiti e gli Upgrade dell'Evoluzione
         righe_testo = []
         for line in testo_evo.split("\n"):
             lc = line.strip()
             if len(lc) > 12 and not lc.startswith("![") and "http" not in lc:
                 righe_testo.append(lc)
 
+        str_righe = "\n".join(righe_testo[:30])
+        str_nomi_evo = ", ".join(nomi_in_questa_evo[:15])
         blocco = (
             f"=== EVOLUZIONE FUT.GG: {nome_evo} ({url_evo}) ===\n"
-            f"Testo Requisiti/Boost estratto da FUT.GG:\n" + "\n".join(righe_testo[:30]) + "\n"
-            f"Giocatori del DB FC 27 compatibili con {nome_evo}: {', '.join(nomi_in_questa_evo[:15])}\n"
+            f"Testo Requisiti/Boost estratto da FUT.GG:\n{str_righe}\n"
+            f"Giocatori del DB FC 27 compatibili con {nome_evo}: {str_nomi_evo}\n"
         )
         dettagli_evo_estratti.append(blocco)
 
-    # 3. Aggiunge anche gli ultimi giocatori inseriti/aggiornati nel database generale di FC 27
     ultimi_players_db = re.findall(r"/players/\d+-([a-zA-Z0-9-]+)/", pagina_players)
     for p_slug in ultimi_players_db[:15]:
         nome_p = p_slug.replace("-", " ").title()
@@ -193,7 +182,6 @@ def estrai_database_reale_fc27_da_futgg():
     return evo_trovate[:6], giocatori_db_fc27[:25], testo_finale_evo[:3000]
 
 def analizza_solo_db_fc27(prompt_specifico):
-    """Impedisce a Gemini di usare vecchi database (FC 24/25) e lo obbliga a usare SOLO i dati estratti da FUT.GG."""
     global modello_scoperto
     if not GEMINI_API_KEY:
         return "⚠️ Chiave GEMINI_API_KEY non trovata su Render."
@@ -299,7 +287,7 @@ def gestisci_comando(testo_msg, chat_id):
                 msg += f"📢 <b>{p['canale']} ({p['data_ora']}):</b>\n<i>{pulito[:200]}</i>\n\n"
 
         if evo_trovate:
-             msg += "🧬 <b>Ultime Evoluzioni FC 27 su FUT.GG:</b>\n"
+            msg += "🧬 <b>Ultime Evoluzioni FC 27 su FUT.GG:</b>\n"
             for n, link in evo_trovate[:4]:
                 msg += f"• <a href='{link}'>{n}</a>\n"
             msg += "\n"
@@ -402,7 +390,6 @@ def ascolta_comandi_telegram():
 def scansiona_e_anticipa_h24():
     global messaggi_gia_visti, evo_gia_viste
 
-    # 1. Controlla veri post nuovi sui canali Telegram aperti
     leaks = leggi_post_reali_telegram()
     for item in leaks:
         txt = item["testo"]
@@ -425,7 +412,6 @@ def scansiona_e_anticipa_h24():
                         f"🎯 <b>CARTE DB FC 27 DA COMPRARE:</b>\n{analisi}"
                     )
 
-    # 2. Controlla se esce una nuova Evoluzione su FUT.GG
     evo_trovate, giocatori_fc27, dettagli_pagine_evo = estrai_database_reale_fc27_da_futgg()
     for nome_evo, link_evo in evo_trovate:
         if nome_evo not in evo_gia_viste:
@@ -484,4 +470,3 @@ threading.Thread(target=ascolta_comandi_telegram, daemon=True).start()
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-
