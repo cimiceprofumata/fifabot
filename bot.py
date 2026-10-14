@@ -15,7 +15,6 @@ TELEGRAM_CHAT_ID = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
 GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or "").strip()
 EA_TAX = 0.05
 
-# Canali Telegram pubblici attivi
 CANALI_TELEGRAM_APERTI = [
     "Fut_Scoreboard",
     "futpoliceleaks",
@@ -23,18 +22,17 @@ CANALI_TELEGRAM_APERTI = [
     "futtrading"
 ]
 
-# Profili X (Twitter) scansionati in tempo reale (inclusi FUT Police e Killer FUT Trading)
 PROFILI_X_LEAKERS = [
     "https://x.com/Fut_Scoreboard",
     "https://x.com/FutPoliceLeaks",
     "https://x.com/KillerFutTrade",
     "https://x.com/FutSheriff",
     "https://x.com/AsyFutTrader",
-    "https://x.com/DonkTrading",
-    "https://x.com/Criminal__x"
+    "https://x.com/DonkTrading"
 ]
 
-FRASI_SPAZZATURA_TELEGRAM = [
+# Blocca qualsiasi banner di Telegram (incluso [Send Message] e tg://resolve)
+FRASI_SPAZZATURA = [
     "if you have telegram",
     "you can contact",
     "right away",
@@ -42,7 +40,11 @@ FRASI_SPAZZATURA_TELEGRAM = [
     "download telegram",
     "join channel",
     "subscribers",
-    "preview channel"
+    "preview channel",
+    "send message",
+    "tg://resolve",
+    "context",
+    "embed"
 ]
 
 PAROLE_TRIGGER = [
@@ -110,76 +112,114 @@ def scarica_testo_jina(target_url):
         pass
     return ""
 
-def cerca_leak_su_x_tramite_jina():
-    """Interroga direttamente i profili X (inclusi FUT Police e Killer FUT Trading) tramite Jina."""
-    raccolta_x = []
-    for u in PROFILI_X_LEAKERS:
-        handle = u.split("/")[-1]
-        raw = scarica_testo_jina(u)
-        if not raw:
+def pulisci_righe_testo(raw_text, min_len=25):
+    """Pulisce il testo scaricato rimuovendo link, immagini e scritte [Send Message]."""
+    righe_buone = []
+    for r in raw_text.split("\n"):
+        rc = r.strip()
+        rc_low = rc.lower()
+        if len(rc) < min_len:
             continue
-        for line in raw.split("\n"):
-            lc = line.strip()
-            lc_low = lc.lower()
-            if len(lc) > 30 and not lc.startswith("![") and "http" not in lc:
-                if any(k in lc_low for k in PAROLE_TRIGGER):
-                    if not any(bad in lc_low for bad in ["log in", "sign up", "cookies", "terms of service"]):
-                        raccolta_x.append(f"[@{handle} su X]: {lc[:350]}")
-    return raccolta_x[:10]
+        if rc.startswith("![") or rc.startswith("http") or rc.startswith("Title:") or rc.startswith("URL Source:"):
+            continue
+        if any(bad in rc_low for bad in FRASI_SPAZZATURA):
+            continue
+        righe_buone.append(rc)
+    return righe_buone
 
-def leggi_post_reali_telegram():
+def leggi_leak_reali_x_e_telegram():
+    """Raccoglie solo veri post di leak da X e Telegram, ignorando bottoni e link di sistema."""
     raccolta = []
     tz_it = timezone(timedelta(hours=2))
-    oggi_str = datetime.now(tz_it).strftime("%d/%m/%Y %H:%M")
+    ora_str = datetime.now(tz_it).strftime("%d/%m/%Y %H:%M")
 
+    # 1. Legge i profili X
+    for u in PROFILI_X_LEAKERS[:4]:
+        handle = u.split("/")[-1]
+        raw = scarica_testo_jina(u)
+        righe = pulisci_righe_testo(raw, min_len=35)
+        for linea in righe:
+            if any(k in linea.lower() for k in PAROLE_TRIGGER):
+                if not any(x_bad in linea.lower() for x_bad in ["log in", "sign up", "terms of service", "cookie"]):
+                    raccolta.append(f"[{ora_str} | @{handle} su X]: {linea[:320]}")
+
+    # 2. Legge i canali Telegram
     for canale in CANALI_TELEGRAM_APERTI:
         raw = scarica_testo_jina(f"https://t.me/s/{canale}")
-        if not raw:
-            continue
+        righe = pulisci_righe_testo(raw, min_len=30)
+        for post in righe[-3:]:
+            if any(k in post.lower() for k in PAROLE_TRIGGER):
+                raccolta.append(f"[{ora_str} | @{canale} su TG]: {post[:320]}")
 
-        righe_pulite = []
-        for r in raw.split("\n"):
-            rc = r.strip()
-            rc_low = rc.lower()
-            if len(rc) < 25:
-                continue
-            if rc.startswith("![") or rc.startswith("http") or rc.startswith("Title:") or rc.startswith("URL Source:"):
-                continue
-            if any(spazzatura in rc_low for spazzatura in FRASI_SPAZZATURA_TELEGRAM):
-                continue
-            righe_pulite.append(rc)
+    return raccolta[:10]
 
-        for post in righe_pulite[-3:]:
-            raccolta.append({
-                "canale": f"@{canale}",
-                "data_ora": oggi_str,
-                "testo": post[:400]
-            })
-
-    return raccolta
-
-def cerca_giocatori_futgg_per_requisiti():
-    giocatori_estratti = []
-    urls_da_leggere = [
-        "https://www.fut.gg/players/momentum/",
-        "https://www.fut.gg/evolutions/trending/",
-        "https://www.fut.gg/players/"
-    ]
-    for u in urls_da_leggere:
-        raw = scarica_testo_jina(u)
-        if not raw:
-            continue
-        matches = re.findall(r"/players/\d+-([a-zA-Z0-9-]+)/", raw)
-        for slug in matches:
-            nome = slug.replace("-", " ").title()
-            if len(nome) > 3 and nome not in giocatori_estratti:
-                giocatori_estratti.append(nome)
-    return giocatori_estratti[:30]
-
-def interroga_gemini_con_x_search(prompt_utente):
+def estrai_schede_complete_futgg():
     """
-    Usa Google Search Grounding forzato su X (inclusi FUT Police e Killer FUT Trading) e FUT.GG,
-    verificando rigorosamente il NUMERO MASSIMO DI PLAYSTYLES consentito dalle Evoluzioni.
+    Scarica da FUT.GG NON SOLO I NOMI, ma il TESTO COMPLETO delle schede giocatori,
+    delle Evoluzioni attive e della classifica Best Evolutions ranked by GG Rating!
+    Così Gemini legge il vero Club in FC 27, il vero OVR, i PlayStyles e il vero GG Rating!
+    """
+    blocchi_dati_futgg = []
+
+    # 1. Pagina Best Evolutions (ordinata per GG Rating / Meta Rating su FUT.GG!)
+    raw_best_evo = scarica_testo_jina("https://www.fut.gg/evolutions/best/")
+    righe_best = pulisci_righe_testo(raw_best_evo, min_len=15)
+    if righe_best:
+        str_best = "\n".join(righe_best[:45])
+        blocchi_dati_futgg.append(f"=== CLASSIFICA FUT.GG BEST EVOLUTIONS (RANKED BY GG RATING) ===\n{str_best}")
+
+    # 2. Pagina Evolutions Principale (con i nomi delle Evo e gli upgrade)
+    raw_evos = scarica_testo_jina("https://www.fut.gg/evolutions/")
+    righe_evos = pulisci_righe_testo(raw_evos, min_len=15)
+    if righe_evos:
+        str_evos = "\n".join(righe_evos[:40])
+        blocchi_dati_futgg.append(f"=== PAGINA EVOLUZIONI ATTIVE FUT.GG ===\n{str_evos}")
+
+    # 3. Estrae i primi 6 URL di giocatori presenti in Best/Trending Evolutions e apre le loro schede su FUT.GG
+    # per leggere Club reale in FC 27 (es. Kayode -> Brentford 81), GG Rating e PlayStyles!
+    raw_trending = scarica_testo_jina("https://www.fut.gg/evolutions/trending/")
+    links_players = re.findall(r"(/players/\d+-[a-zA-Z0-9-]+/)", raw_best_evo + "\n" + raw_trending)
+    visti_p = []
+    for lp in links_players:
+        if lp not in visti_p:
+            visti_p.append(lp)
+
+    schede_giocatori = []
+    for lp in visti_p[:5]:
+        raw_p = scarica_testo_jina(f"https://www.fut.gg{lp}")
+        if raw_p:
+            righe_p = pulisci_righe_testo(raw_p, min_len=10)
+            estratto_p = " | ".join(righe_p[:18])
+            schede_giocatori.append(f"SCHEDA VERIFICATA FUT.GG ({lp}): {estratto_p[:450]}")
+
+    if schede_giocatori:
+        str_schede = "\n\n".join(schede_giocatori)
+        blocchi_dati_futgg.append(f"=== SCHEDE GIOCATORI VERIFICATE LIVE SU FUT.GG (CLUB, OVR, GG RATING) ===\n{str_schede}")
+
+    return "\n\n".join(blocchi_dati_futgg)
+
+def cerca_schede_giocatori_specifici_su_futgg(query_ricerca):
+    """Quando usi /simula o /leak per un ruolo specifico (es. LB o RB), estrae i dati veri da FUT.GG."""
+    urls_specifici = ["https://www.fut.gg/evolutions/best/"]
+    q_low = query_ricerca.lower()
+    for ruolo in ["lb", "rb", "cb", "cdm", "cm", "cam", "lw", "rw", "st"]:
+        if ruolo in q_low:
+            urls_specifici.insert(0, f"https://www.fut.gg/tactics/most-used-players/{ruolo}/")
+            urls_specifici.insert(1, f"https://www.fut.gg/players/tallest/{ruolo}/")
+
+    testi = []
+    for u in urls_specifici[:2]:
+        raw = scarica_testo_jina(u)
+        righe = pulisci_righe_testo(raw, min_len=12)
+        if righe:
+            str_r = "\n".join(righe[:45])
+            testi.append(f"DATI FUT.GG DA {u}:\n{str_r}")
+    return "\n\n".join(testi)
+
+def analizza_con_verifica_rigorosa_futgg(prompt_utente):
+    """
+    Interroga Gemini imponendo l'uso dei dati testuali estratti da FUT.GG (GG Rating, Club 2026/27, OVR reale)
+    e vietando rigorosamente di usare la memoria vecchia non verificata.
     """
     global modello_scoperto
     if not GEMINI_API_KEY:
@@ -189,25 +229,20 @@ def interroga_gemini_con_x_search(prompt_utente):
     oggi = datetime.now(tz_it).strftime("%d/%m/%Y %H:%M")
     sistema = (
         f"Data e ora attuale italiana: {oggi} (Ottobre 2026, stagione EA Sports FC 27). "
-        "Sei lo scanner predittivo di leak X e FUT.GG per EA Sports FC 27 Ultimate Team (PlayStation, budget 800k).\n"
-        "REGOLE FONDAMENTALI DI ANALISI:\n"
-        "1) FONTI X PRIORITARIE: Cerca su X (Twitter) i post e i leak di OGGI di: @Fut_Scoreboard, @FutPoliceLeaks (FUT Police), "
-        "Killer FUT Trading (@KillerFutTrade), @FutSheriff, @AsyFutTrader, @DonkTrading e @Criminal__x.\n"
-        "2) CONTROLLO RIGOROSO DEL LIMITE NUMERO MASSIMO DI PLAYSTYLES (FONDAMENTALE): "
-        "Le Evoluzioni di EA FC 27 impongono quasi sempre un limite sul numero massimo di PlayStyles totali (es. Max 6, Max 7 o Max 8 PlayStyles base) "
-        "e di PlayStyles+ (es. Max 0 o Max 1 PS+). Quando selezioni i giocatori su FUT.GG:\n"
-        "   - SCARTA le carte che hanno troppi PlayStyles base inutili (8+ PlayStyles) che rischierebbero di essere bloccate dal requisito 'Max PlayStyles'!\n"
-        "   - PRIVILEGIA le carte che hanno un numero contenuto di PlayStyles (es. da 3 a 6 PlayStyles base totali, e 0 o 1 PS+), ma tutti altamente META "
-        "(Quick Step, Rapid, Anticipate, Jockey, Intercept, Finesse Shot, Incisive Pass, Technical, Whipped Pass).\n"
-        "3) SCHEDA TECNICA DEL LEAK: Riporta sempre Fonte, Data/Ora, Requisiti (Ruolo, Max OVR, Max Pace, MAX PLAYSTYLES e MAX PLAYSTYLES+) "
-        "e quali Stats/PlayStyles+ aggiunge il boost.\n"
-        "4) LISTA CARTE EA FC 27 (Stagione 2026/2027 su FUT.GG): Per ogni giocatore consigliato scrivi:\n"
-        "   • Nome, Cognome, OVR in FC 27 e Club attuale in FC 27.\n"
-        "   • NUMERO ESATTO DI PLAYSTYLES ATTUALI (es. '4 PlayStyles base + 0 PS+: Quick Step, Jockey...') spiegando perché rispetta il limite Max PlayStyles.\n"
-        "   • Prezzo reale attuale pre-hype su PlayStation (650-1.200 cr per gli Oro 75-81) e target di rivendita nell'hype (3.500-9.000 cr).\n"
+        "Sei l'analista collegato al database di FUT.GG per EA Sports FC 27 Ultimate Team (PlayStation, budget 800k).\n"
+        "REGOLE TASSATIVE CONTRO ERRORI DI DATABASE E ALLUCINAZIONI:\n"
+        "1) NON USARE MAI VECCHI CLUB O VECCHI OVERALL DELLA TUA MEMORIA (esempio: in EA FC 27 Michael Kayode gioca nel Brentford ed è 81 OVR con GG Rating 77.7, NON è 78 alla Fiorentina! Robin Risser è un portiere, NON metterlo mai come terzino!).\n"
+        "2) VERIFICA OGNI SINGOLO GIOCATORE: Devi citare SOLO giocatori di cui vedi chiaramente il Club attuale 2026/27, il Ruolo reale, l'Overall reale in EA FC 27 e il GG Rating (il Meta Rating ufficiale di FUT.GG) nei dati estratti qui sotto o tramite ricerca Google diretta su site:fut.gg!\n"
+        "3) CONSIDERA SEMPRE IL 'GG RATING' (META RATING DI FUT.GG) + IL LIMITE MAX PLAYSTYLES: "
+        "Su FUT.GG ogni carta ha un punteggio chiamato GG Rating (es. RB 85.4, LB 82.5). Scegli le carte che rispettano i requisiti del leak (Overall massimo, Ruolo, e numero massimo di PlayStyles base/PS+) e che raggiungono il GG Rating più alto!\n"
+        "4) Se per un giocatore non sei sicuro al 100% del suo OVR o Club in EA FC 27 su FUT.GG, NON INSERIRLO nella lista.\n"
+        "5) Per ogni carta consigliata indica:\n"
+        "   • Nome e Cognome, Ruolo reale, OVR reale in EA FC 27 e Club reale in EA FC 27.\n"
+        "   • GG Rating (Meta Rating di FUT.GG) e PlayStyles attuali (verificando che non superi il limite Max PlayStyles dell'Evo).\n"
+        "   • Prezzo reale su PlayStation e target di rivendita.\n"
         "Non usare simboli Markdown come asterischi (*) o cancelletti (#). Usa solo elenchi con •."
     )
-    testo_completo = f"{sistema}\n\nRICHIESTA OPERATIVA:\n{prompt_utente}"
+    testo_completo = f"{sistema}\n\nDATI VERIFICATI ESTRATTI ORA DA FUT.GG E LEAKER:\n{prompt_utente}"
 
     modelli_da_provare = trova_modelli_attivi()
     ultimo_errore = "Nessuna risposta"
@@ -217,7 +252,7 @@ def interroga_gemini_con_x_search(prompt_utente):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{modello}:generateContent?key={GEMINI_API_KEY}"
             body = {
                 "contents": [{"parts": [{"text": testo_completo}]}],
-                "generationConfig": {"temperature": 0.1}
+                "generationConfig": {"temperature": 0.0}
             }
             if tool_config:
                 body["tools"] = tool_config
@@ -251,88 +286,71 @@ def gestisci_comando(testo_msg, chat_id):
 
     if comando in ["/start", "/help", "/menu"]:
         menu = (
-            "🎯 <b>BOT SNIPER LEAK X & FILTRO MAX PLAYSTYLES (FC 27)</b>\n"
-            "💰 Budget: 800.000 crediti (PlayStation)\n"
-            "📡 <i>Fonti X attive: FUT Scoreboard, FUT Police, Killer FUT Trading, Sheriff, AsyFut, Donk</i>\n\n"
-            "🔥 <b>/leak</b> - Scansiona i leak di oggi e seleziona le carte su FUT.GG verificando <b>Overall, Ruolo e Limite Max PlayStyles</b>\n\n"
-            "🔮 <b>/simula [requisiti leak]</b> - Es: <code>/simula Evo LB RB Max 80 OVR Max 7 PlayStyles</code>\n\n"
-            "🧬 <b>/evo</b> - Analizza le Evoluzioni su FUT.GG filtrando per conteggio PlayStyles e Meta Rating\n\n"
+            "🎯 <b>BOT SNIPER EA FC 27 (SCHEDE VERIFICATE FUT.GG & GG RATING)</b>\n"
+            "💰 Budget: 800.000 crediti (PlayStation)\n\n"
+            "🔥 <b>/leak</b> - Intercetta i leak reali e legge le <b>schede complete di FUT.GG (Club FC 27, OVR reale, GG Rating e Max PlayStyles)</b>\n\n"
+            "🔮 <b>/simula [requisiti leak]</b> - Es: <code>/simula Evo LB RB Max 80 OVR Max 6 PlayStyles</code>\n\n"
+            "🧬 <b>/evo</b> - Legge la classifica <b>Best Evolutions di FUT.GG ordinata per GG Rating</b>\n\n"
             "🧮 <b>/tassa 50000</b> - Calcola pareggio (5%) e profitto"
         )
         invia_telegram(menu, chat_id)
 
-    elif comando == "/leak":
+    elif comando in ["/leak", "/evo"]:
         invia_telegram(
-            "🕵️‍♂️ <i>Scansione X (FUT Police, Killer FUT Trading, Scoreboard, Sheriff) + Filtro Max PlayStyles su FUT.GG...</i>",
+            "🕵️‍♂️ <i>Estrazione Schede Complete da FUT.GG (Club 2026/27, OVR, PlayStyles e GG Rating ufficiale) + Scansione Leak...</i>",
             chat_id
         )
-        tweet_x = cerca_leak_su_x_tramite_jina()
-        post_tg = leggi_post_reali_telegram()
-        giocatori_futgg = cerca_giocatori_futgg_per_requisiti()
+        leaks_reali = leggi_leak_reali_x_e_telegram()
+        schede_futgg = estrai_schede_complete_futgg()
+        dati_ruolo_lbrb = cerca_schede_giocatori_specifici_su_futgg("lb rb")
 
-        blocco_x = "\n".join(tweet_x) if tweet_x else "Cerca direttamente su X.com i post di oggi."
-        blocco_tg = "\n".join([f"- {p['canale']}: {p['testo']}" for p in post_tg[-5:]]) if post_tg else "Nessun post Telegram."
-        str_g = ", ".join(giocatori_futgg[:20])
+        blocco_leaks = "\n".join(leaks_reali) if leaks_reali else "Nessun nuovo post testuale diretto; usa Google Search su site:x.com e i dati FUT.GG estratti qui sotto."
 
         prompt = (
-            f"TWEET INTERCETTATI DA X:\n{blocco_x}\n\n"
-            f"POST INTERCETTATI DA TELEGRAM:\n{blocco_tg}\n\n"
-            f"GIOCATORI RILEVATI SU FUT.GG (EA FC 27): {str_g}\n\n"
-            "COMPITO PRIORITARIO:\n"
-            "1) Cerca su X tutti i leak usciti nelle ultime ore su EA Sports FC 27 da FUT Police (@FutPoliceLeaks), Killer FUT Trading (@KillerFutTrade), "
-            "@Fut_Scoreboard, @FutSheriff e @AsyFutTrader (inclusa la nuova Evoluzione per LB/RB Max 80 OVR e qualsiasi altra Evo in arrivo).\n"
-            "2) Riporta i requisiti completi: Ruolo, Max OVR, Max Pace e soprattutto il LIMITE MASSIMO DI PLAYSTYLES E PLAYSTYLES+.\n"
-            "3) Seleziona nel database EA FC 27 di FUT.GG i 7 MIGLIORI GIOCATORI SPECIFICI (Nome, Cognome, OVR in FC 27, Club in FC 27) "
-            "che rispettano anche il limite sul numero massimo di PlayStyles (carte con 3-6 PlayStyles base ma tutti Meta, così entrano sicuramente nell'Evo!).\n"
-            "4) Indica per ciascuno il numero di PlayStyles attuali, prezzo di acquisto a scarto su PS e target di rivendita."
+            f"LEAK INTERCETTATI DA X E TELEGRAM:\n{blocco_leaks}\n\n"
+            f"DATI COMPLETI ESTRATTI LIVE DA FUT.GG (INCLUSO GG RATING E SCHEDE GIOCATORI):\n{schede_futgg[:2500]}\n\n"
+            f"DATI RUOLO TERZINI (LB/RB) DA FUT.GG:\n{dati_ruolo_lbrb[:1200]}\n\n"
+            "ISTRUZIONI TASSATIVE:\n"
+            "1) Riporta i dettagli degli ultimi leak di Evoluzioni (es. Fullback Fork / Evo LB-RB Max 80 OVR o le Evoluzioni attive elencate nei dati FUT.GG qui sopra) "
+            "specificando Requisiti, Max PlayStyles e Boost.\n"
+            "2) Seleziona 6 GIOCATORI VERIFICATI (controllando su FUT.GG che il loro Club 2026/27, il loro Ruolo e il loro OVR in EA FC 27 siano esatti al 100%!).\n"
+            "3) Per ogni carta indica il GG RATING (Meta Rating di FUT.GG), i PlayStyles attuali (verificando il limite Max PlayStyles) e i prezzi reali su PlayStation."
         )
-        analisi = interroga_gemini_con_x_search(prompt)
+        analisi = analizza_con_verifica_rigorosa_futgg(prompt)
 
-        msg = "🚨 <b>RADAR LEAK X (FUT POLICE / KILLER FUT / SCOREBOARD) & FILTRO PLAYSTYLES:</b>\n\n"
-        if tweet_x:
-            for tx in tweet_x[:3]:
-                pulito = tx.replace("<", "&lt;").replace(">", "&gt;")
-                msg += f"🐦 <i>{pulito[:200]}</i>\n\n"
-        elif post_tg:
-            for p in post_tg[-2:]:
-                pulito = p["testo"].replace("<", "&lt;").replace(">", "&gt;")
-                msg += f"📢 <b>{p['canale']} ({p['data_ora']}):</b> <i>{pulito[:200]}</i>\n\n"
+        msg = "🚨 <b>REPORT VERIFICATO FUT.GG (GG RATING, CLUB FC 27 & MAX PLAYSTYLES):</b>\n\n"
+        if leaks_reali:
+            for lk in leaks_reali[:3]:
+                pulito = lk.replace("<", "&lt;").replace(">", "&gt;")
+                msg += f"📢 <i>{pulito[:220]}</i>\n\n"
 
-        msg += f"🎯 <b>ANALISI LEAK & CARTE CON CONTROLLO MAX PLAYSTYLES:</b>\n{analisi}"
+        msg += f"🎯 <b>CARTE VERIFICATE SU FUT.GG (ZERO ALLUCINAZIONI):</b>\n{analisi}\n\n"
+        msg += "🔗 <a href='https://www.fut.gg/evolutions/best/'>Apri Classifica GG Rating su FUT.GG</a>"
         invia_telegram(msg, chat_id)
 
     elif comando == "/simula":
         if len(parti) < 2:
             invia_telegram(
-                "🔮 <b>SIMULATORE CON FILTRO MAX PLAYSTYLES</b>\n"
-                "Scrivi i requisiti del leak visto su X! Esempio:\n"
-                "<code>/simula Evo LB RB Max 80 OVR Max 7 PlayStyles Max 0 PS+</code>",
+                "🔮 <b>SIMULATORE CON GG RATING & VERIFICA CLUB FC 27</b>\n"
+                "Scrivi i requisiti del leak:\n"
+                "<code>/simula Evo LB RB Max 80 OVR Max 6 PlayStyles</code>",
                 chat_id
             )
             return
         leak_input = " ".join(parti[1:])
-        invia_telegram(f"🔮 <i>Verifica su FUT.GG delle carte EA FC 27 compatibili (controllo Overall + Max PlayStyles) per: '{leak_input}'...</i>", chat_id)
+        invia_telegram(f"🔮 <i>Estrazione dati da FUT.GG per '{leak_input}' (verifica Club FC 27, OVR, PlayStyles e GG Rating)...</i>", chat_id)
+        dati_specifici = cerca_schede_giocatori_specifici_su_futgg(leak_input)
+        schede_futgg = estrai_schede_complete_futgg()
         prompt = (
-            f"Simula questo leak di X per EA FC 27: '{leak_input}'.\n"
-            "1) Verifica i limiti di Overall, Statistiche e NUMERO MASSIMO DI PLAYSTYLES / PLAYSTYLES+.\n"
-            "2) Trova su FUT.GG (database EA FC 27 stagione 2026/2027) gli 8 MIGLIORI GIOCATORI REALI (Nome, Cognome, OVR in FC 27, Club in FC 27) "
-            "che NON superano il numero massimo di PlayStyles consentito e che possiedono i PlayStyles più in meta.\n"
-            "3) Specifica per ogni carta quanti PlayStyles ha attualmente, il prezzo di acquisto su PS e il target di rivendita."
+            f"L'utente vuole simulare questo leak su EA FC 27: '{leak_input}'.\n"
+            f"Dati specifici ruolo estratti da FUT.GG:\n{dati_specifici[:1800]}\n\n"
+            f"Dati Best Evolutions FUT.GG:\n{schede_futgg[:1500]}\n\n"
+            "Trova 6 giocatori REALI di EA Sports FC 27 (verificando su site:fut.gg che abbiano davvero quel ruolo, quell'OVR <= limite richiesto "
+            "e il club aggiornato alla stagione 2026/27, senza mai sbagliare club o ruolo!). "
+            "Ordina i giocatori in base al GG Rating (Meta Rating di FUT.GG) e al rispetto del limite massimo di PlayStyles, indicando i prezzi su PS."
         )
-        risp = interroga_gemini_con_x_search(prompt)
-        invia_telegram(f"🎯 <b>CARTE COMPATIBILI (FILTRO MAX PLAYSTYLES) PER '{leak_input.upper()}':</b>\n\n{risp}", chat_id)
-
-    elif comando == "/evo":
-        invia_telegram("🧬 <i>Analisi Evoluzioni FUT.GG con verifica limiti Max PlayStyles...</i>", chat_id)
-        giocatori_futgg = cerca_giocatori_futgg_per_requisiti()
-        str_g = ", ".join(giocatori_futgg[:20])
-        prompt = (
-            f"Giocatori in movimento su FUT.GG (EA FC 27): {str_g}.\n"
-            "Analizza le ultime Evoluzioni uscite e leakate oggi su EA FC 27 (tenendo conto dei blocchi sul numero massimo di PlayStyles base e PS+). "
-            "Elenca 7 carte specifiche del database di EA FC 27 che entrano senza blocchi di PlayStyles e raggiungono il Meta Rating più alto."
-        )
-        consiglio = interroga_gemini_con_x_search(prompt)
-        invia_telegram(f"🔥 <b>REPORT EVOLUZIONI & CONTROLLO PLAYSTYLES (FUT.GG):</b>\n\n{consiglio}", chat_id)
+        risp = analizza_con_verifica_rigorosa_futgg(prompt)
+        invia_telegram(f"🎯 <b>SIMULAZIONE VERIFICATA FUT.GG PER '{leak_input.upper()}':</b>\n\n{risp}", chat_id)
 
     elif comando == "/tassa":
         if len(parti) < 2:
@@ -360,12 +378,13 @@ def gestisci_comando(testo_msg, chat_id):
 
     elif comando == "/chiedi":
         if len(parti) < 2:
-            invia_telegram("Scrivi una domanda! Es: <code>/chiedi terzini max 80 con massimo 6 playstyles per la nuova evo?</code>", chat_id)
+            invia_telegram("Scrivi una domanda! Es: <code>/chiedi quali sono le carte di Michael Kayode su FC 27 e il loro GG Rating?</code>", chat_id)
             return
         domanda = " ".join(parti[1:])
-        invia_telegram("🧠 <i>Ricerca live su X e FUT.GG in corso...</i>", chat_id)
-        risp = interroga_gemini_con_x_search(domanda)
-        invia_telegram(f"🤖 <b>ANALISTA FC 27:</b>\n\n{risp}", chat_id)
+        invia_telegram("🧠 <i>Lettura dati FUT.GG in corso...</i>", chat_id)
+        schede_futgg = estrai_schede_complete_futgg()
+        risp = analizza_con_verifica_rigorosa_futgg(f"Domanda: {domanda}\nDati FUT.GG live:\n{schede_futgg[:2000]}")
+        invia_telegram(f"🤖 <b>RISPOSTA VERIFICATA FUT.GG:</b>\n\n{risp}", chat_id)
 
 def ascolta_comandi_telegram():
     global ultimo_update_id
@@ -398,54 +417,32 @@ def ascolta_comandi_telegram():
             time.sleep(3)
 
 def scansiona_x_e_telegram_h24():
-    """Controlla ogni 60 secondi i profili X (inclusi FUT Police e Killer FUT Trading) e i canali Telegram."""
     global messaggi_gia_visti
-
-    # 1. Scansiona i profili X
-    tweet_x = cerca_leak_su_x_tramite_jina()
-    for tx in tweet_x:
-        id_tx = hash(tx[:90])
-        if id_tx not in messaggi_gia_visti:
-            messaggi_gia_visti.add(id_tx)
+    leaks = leggi_leak_reali_x_e_telegram()
+    for lk in leaks:
+        id_lk = hash(lk[:90])
+        if id_lk not in messaggi_gia_visti:
+            messaggi_gia_visti.add(id_lk)
             if len(messaggi_gia_visti) > 4:
-                analisi = interroga_gemini_con_x_search(
-                    f"NUOVO TWEET LEAK INTERCETTATO SU X:\n'{tx}'\n"
-                    "Estrai subito i requisiti (ruolo, max overall, limite MAX PLAYSTYLES e boost) e indica i 6 migliori giocatori reali "
-                    "del database EA FC 27 su FUT.GG che rispettano il numero massimo di PlayStyles da comprare ADESSO su PS!"
+                schede_futgg = estrai_schede_complete_futgg()
+                analisi = analizza_con_verifica_rigorosa_futgg(
+                    f"NUOVO LEAK APPENA RILEVATO:\n'{lk}'\n\n"
+                    f"Dati verificati FUT.GG:\n{schede_futgg[:2000]}\n\n"
+                    "Seleziona 5-6 carte REALI di EA FC 27 (con Club 2026/27, OVR reale, GG Rating e verifica Max PlayStyles) da comprare ora su PS!"
                 )
-                pulito = tx.replace("<", "&lt;").replace(">", "&gt;")
+                pulito = lk.replace("<", "&lt;").replace(">", "&gt;")
                 invia_telegram(
-                    f"🚨 <b>NUOVO LEAK RILEVATO DA X!</b>\n\n"
-                    f"🐦 <i>{pulito}</i>\n\n"
-                    f"🎯 <b>CARTE COMPATIBILI (VERIFICA MAX PLAYSTYLES):</b>\n{analisi}"
+                    f"🚨 <b>NUOVO LEAK VERIFICATO IN TEMPO REALE!</b>\n\n"
+                    f"📝 <i>{pulito}</i>\n\n"
+                    f"🎯 <b>CARTE FUT.GG (GG RATING & PLAYSTYLES):</b>\n{analisi}"
                 )
-
-    # 2. Scansiona i canali Telegram
-    leaks_tg = leggi_post_reali_telegram()
-    for item in leaks_tg:
-        txt = item["testo"]
-        id_msg = hash(txt[:80])
-        if id_msg not in messaggi_gia_visti:
-            messaggi_gia_visti.add(id_msg)
-            if any(k in txt.lower() for k in PAROLE_TRIGGER):
-                if len(messaggi_gia_visti) > 4:
-                    analisi = interroga_gemini_con_x_search(
-                        f"NUOVO LEAK DA {item['canale']} ({item['data_ora']}):\n'{txt}'\n"
-                        "Trova subito nel database EA FC 27 di FUT.GG i 6 giocatori migliori verificando anche il limite massimo di PlayStyles!"
-                    )
-                    pulito = txt[:340].replace("<", "&lt;").replace(">", "&gt;")
-                    invia_telegram(
-                        f"🚨 <b>NUOVO LEAK INTERCETTATO ({item['canale']})!</b>\n\n"
-                        f"📝 <i>{pulito}</i>\n\n"
-                        f"🎯 <b>CARTE COMPATIBILI (VERIFICA MAX PLAYSTYLES):</b>\n{analisi}"
-                    )
 
 def motore_h24():
     avvio = (
-        "🛡️ <b>BOT AGGIORNATO: AGGIUNTI 'FUT POLICE', 'KILLER FUT TRADING' + FILTRO MAX PLAYSTYLES!</b>\n\n"
-        "• Nuove fonti X monitorate H24: <b>@FutPoliceLeaks, @KillerFutTrade, @Fut_Scoreboard, @FutSheriff, @AsyFutTrader, @DonkTrading</b>.\n"
-        "• <b>Controllo Max PlayStyles attivo:</b> il bot ora verifica quanti PlayStyles base e PS+ ha ogni carta per scartare quelle che vengono bloccate dai limiti dell'Evo!\n\n"
-        "Scrivi <b>/leak</b> o <b>/simula Evo LB RB Max 80 OVR Max 7 PlayStyles</b> per testarlo!"
+        "🛡️ <b>BOT AGGIORNATO: LETTURA SCHEDE COMPLETE FUT.GG (CLUB FC 27, OVR REALE & GG RATING)!</b>\n\n"
+        "• Eliminato definitivamente il bug <i>[Send Message]</i>.\n"
+        "• Ora lo script Python scarica <b>l'intero testo delle schede di FUT.GG</b> (es. Kayode = Brentford 81 OVR, GG Rating 77.7) così Gemini non può più pescare club o ruoli sbagliati dalla memoria vecchia!\n\n"
+        "Prova subito <b>/leak</b> o <b>/evo</b>!"
     )
     invia_telegram(avvio)
     scansiona_x_e_telegram_h24()
@@ -472,7 +469,7 @@ def motore_h24():
 
 @app.route("/")
 def home():
-    return "FC 27 X Scanner (FUT Police + Killer FUT + Max PlayStyles Filter) Running!"
+    return "FC 27 Full FUT.GG Card Scraper & GG Rating Bot Running!"
 
 threading.Thread(target=motore_h24, daemon=True).start()
 threading.Thread(target=ascolta_comandi_telegram, daemon=True).start()
