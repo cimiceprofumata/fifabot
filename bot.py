@@ -64,21 +64,6 @@ TRIGGERS_LEAK = [
     "cm", "cam", "lw", "rw", "st", "fullback"
 ]
 
-MAPPA_POSIZIONI_FUTGG = {
-    "gk": "1",
-    "rb": "2",
-    "cb": "3",
-    "lb": "4",
-    "cdm": "5",
-    "rm": "6",
-    "cm": "7",
-    "lm": "8",
-    "cam": "9",
-    "rw": "10",
-    "lw": "11",
-    "st": "12"
-}
-
 messaggi_gia_visti = set()
 ultimo_update_id = 0
 modello_scoperto = None
@@ -254,82 +239,6 @@ def estrai_parametri_da_leak(testo):
 
     return max_ovr, ruoli_trovati
 
-def pulisci_scheda_singola_futgg(raw_text):
-    if not raw_text:
-        return ""
-    testo = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r" [\1] ", raw_text)
-    testo = re.sub(r"\[([^\]]+)\]\([^)]+\)", r" \1 ", testo)
-
-    righe_utili = []
-    for r in testo.split("\n"):
-        rc = " ".join(r.split()).strip()
-        if not rc:
-            continue
-        rl = rc.lower()
-        if rc.startswith("http") or rc.startswith("URL Source:"):
-            continue
-        if any(sp in rl for sp in SPAM_WORDS):
-            continue
-        righe_utili.append(rc)
-
-    corpo = " | ".join(righe_utili[15:160]) if len(righe_utili) > 20 else " | ".join(righe_utili)
-    return corpo[:2600]
-
-def cerca_carte_con_id_completo_futgg(testo_leak):
-    max_ovr, ruoli = estrai_parametri_da_leak(testo_leak)
-    min_ovr = max_ovr - 3
-
-    codici_pos = [MAPPA_POSIZIONI_FUTGG[r] for r in ruoli if r in MAPPA_POSIZIONI_FUTGG]
-    pos_str = ",".join(codici_pos) if codici_pos else "2,4"
-
-    urls_ricerca_db = [
-        f"https://www.fut.gg/players/?overall__lte={max_ovr}&overall__gte={min_ovr}&positions={pos_str}",
-        f"https://www.fut.gg/players/?overall__lte={max_ovr}&overall__gte={min_ovr}"
-    ]
-
-    raws_db = scarica_parallelo(urls_ricerca_db)
-    testo_db_unito = "\n".join([r for r in raws_db if r])
-
-    matches_completi = re.findall(r"(/players/(\d+)-([a-zA-Z0-9-]+)/(\d+-\d+)/)", testo_db_unito)
-
-    giocatori_unici = []
-    visti_id = set()
-    for full_path, pid, slug_nome, card_id in matches_completi:
-        if pid not in visti_id:
-            visti_id.add(pid)
-            nome_cognome = slug_nome.replace("-", " ").title()
-            link_scheda = f"https://www.fut.gg{full_path}"
-            giocatori_unici.append((nome_cognome, link_scheda))
-
-    if not giocatori_unici:
-        matches_base = re.findall(r"(/players/(\d+)-([a-zA-Z0-9-]+)/)", testo_db_unito)
-        for full_path, pid, slug_nome in matches_base[4:]:
-            if pid not in visti_id:
-                visti_id.add(pid)
-                nome_cognome = slug_nome.replace("-", " ").title()
-                link_scheda = f"https://www.fut.gg{full_path}"
-                giocatori_unici.append((nome_cognome, link_scheda))
-
-    top_6 = giocatori_unici[:6]
-    urls_schede = [lk for _, lk in top_6]
-    raw_schede = scarica_parallelo(urls_schede)
-
-    schede_testo = []
-    links_allegati = []
-
-    for idx, (nome_cognome, link_scheda) in enumerate(top_6):
-        raw_s = raw_schede[idx] if idx < len(raw_schede) else ""
-        corpo_scheda = pulisci_scheda_singola_futgg(raw_s)
-        if len(corpo_scheda) > 50:
-            schede_testo.append(
-                f"=== SCHEDA CARTA VERIFICATA FUT.GG: {nome_cognome} ===\n"
-                f"URL CARTA: {link_scheda}\n"
-                f"CONTENUTO INTEGRALE CARTA:\n{corpo_scheda}"
-            )
-            links_allegati.append((nome_cognome, link_scheda))
-
-    return "\n\n".join(schede_testo), max_ovr, ruoli, links_allegati
-
 def analizza_leak_e_schede_con_gemini(prompt_u, max_ovr_f=80, ruoli_f=None):
     global modello_scoperto
     if not GEMINI_API_KEY:
@@ -341,11 +250,11 @@ def analizza_leak_e_schede_con_gemini(prompt_u, max_ovr_f=80, ruoli_f=None):
 
     sys_l = [
         f"Data: {oggi} (Stagione EA Sports FC 27, PlayStation).",
-        "SEI COLLEGATO AL DATABASE LIVE DELLE SCHEDE DI FUT.GG (/players/.../27-.../).",
-        "REGOLE TASSATIVE (VIETATO FALLIRE):",
-        f"1) RISPETTO RIGOROSO DEI FILTRI: Devi selezionare SOLO giocatori che hanno Ruolo [{str_ruoli}] e Overall massimo [{max_ovr_f}] (OVR <= {max_ovr_f}).",
-        "2) LEGGI I DATI DALLLE SCHEDE: Estrai Nome e Cognome completo, Ruolo, Overall esatto, Club reale in FC 27, PlayStyles e GG Rating direttamente dai blocchi 'CONTENUTO INTEGRALE CARTA' forniti qui sotto.",
-        "3) VIETATO SCRIVERE RISPOSTE VUOTE O GENERICHE: Se vedi i dati nelle schede, devi compilare la lista dei giocatori reali!",
+        "SEI COLLEGATO AL MOTORE DI RICERCA GOOGLE GROUNDING E AL DATABASE LIVE DI FUT.GG (site:fut.gg).",
+        "REGOLE TASSATIVE (VIETATO FALLIRE O LASCIARE RISPOSTE VUOTE):",
+        f"1) RISPETTO RIGOROSO DEI FILTRI: Devi selezionare SOLO giocatori reali di EA FC 27 che hanno Ruolo [{str_ruoli}] e Overall massimo [{max_ovr_f}] (OVR <= {max_ovr_f}).",
+        "2) USA GOOGLE SEARCH PER VERIFICARE I GIOCATORI SU FUT.GG: Intercetta tramite ricerca web i nomi dei veri terzini (LB/RB) con OVR 78, 79 o 80 presenti su FUT.GG per EA Sports FC 27.",
+        "3) COMPILA SEMPRE LA LISTA: È severamente vietato scrivere che il database è vuoto o non trasmesso. Seleziona almeno 6 terzini reali conformi ai requisiti.",
         "4) STRUTTURA OBBLIGATORIA DELLA RISPOSTA:",
         "📋 DETTAGLI DEL NUOVO LEAK INTERCETTATO:",
         "• Fonte e Data/Ora: [Post X o Telegram]",
@@ -355,17 +264,18 @@ def analizza_leak_e_schede_con_gemini(prompt_u, max_ovr_f=80, ruoli_f=None):
         f"🎯 CARTE DEL DATABASE FUT.GG ({str_ruoli} - MAX {max_ovr_f} OVR) DA COMPRARE:",
         "Per ciascuna carta scrivi:",
         "• Nome e Cognome Completo | Ruolo | OVR | Club",
-        "• PlayStyles e GG Rating rilevati nella scheda FUT.GG",
+        "• PlayStyles e GG Rating verificati su FUT.GG",
         "• Prezzo di acquisto PS pre-hype (700-1.300 cr) -> Target rivendita nell'hype (3.500-8.500 cr)",
-        "• Scheda FUT.GG: [URL completo della carta]",
+        "• Scheda FUT.GG: https://www.fut.gg/players/... (Cerca il link reale della carta)",
         "Non usare mai asterischi (*) o cancelletti (#)."
     ]
-    full_p = "\n".join(sys_l) + "\n\nDATI SCHEDE CARTE FUT.GG:\n" + prompt_u
+    full_p = "\n".join(sys_l) + "\n\nRICHIESTA:\n" + prompt_u
     base_u = "https://generativelanguage.googleapis.com/v1beta/models"
     err = "Nessuna risposta"
 
     for mod in trova_modelli_attivi():
-        for t_cfg in [[{"google_search": {}}], []]:
+        # Forza SEMPRE l'uso di Google Search Grounding per trovare i dati corretti su FUT.GG!
+        for t_cfg in [[{"google_search": {}}]]:
             url = f"{base_u}/{mod}:generateContent?key={GEMINI_API_KEY}"
             body = {
                 "contents": [{"parts": [{"text": full_p}]}],
@@ -374,7 +284,7 @@ def analizza_leak_e_schede_con_gemini(prompt_u, max_ovr_f=80, ruoli_f=None):
             if t_cfg:
                 body["tools"] = t_cfg
             try:
-                r = requests.post(url, json=body, timeout=28).json()
+                r = requests.post(url, json=body, timeout=30).json()
                 if "error" in r:
                     err = r["error"].get("message", "Err")
                     continue
@@ -386,20 +296,10 @@ def analizza_leak_e_schede_con_gemini(prompt_u, max_ovr_f=80, ruoli_f=None):
                 if out:
                     modello_scoperto = mod
                     out = out.replace("**", "").replace("*", "•").replace("#", "")
-                    out = out.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    return out
+                    return out.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             except Exception as e:
                 err = str(e)
     return f"⚠️ Errore IA: {err[:120]}"
-
-def formatta_box_link_schede(links_allegati):
-    if not links_allegati:
-        return ""
-    righe = ["\n📎 <b>SCHEDE CARTE UFFICIALI FUT.GG ALLEGATE:</b>"]
-    for nome_c, url_s in links_allegati:
-        nome_safe = nome_c.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        righe.append(f"• <a href='{url_s}'>Apri Carta di {nome_safe} su FUT.GG</a>")
-    return "\n".join(righe)
 
 def gestisci_comando(testo_msg, chat_id):
     try:
@@ -411,9 +311,9 @@ def gestisci_comando(testo_msg, chat_id):
         if cmd in ["/start", "/help", "/menu"]:
             utenti_iscritti.add(str(chat_id))
             m_lines = [
-                "🎯 <b>BOT SNIPER EA FC 27 (FILTRO RUOLO + OVR FORZATO)</b>",
+                "🎯 <b>BOT SNIPER EA FC 27 (GOOGLE SEARCH GROUNDING ATTIVO)</b>",
                 f"👥 <i>Utenti collegati H24: {len(utenti_iscritti)}</i>\n",
-                "🔥 <b>/leak</b> - Cerca leak e mostra i terzini reali (LB/RB) con OVR <= 80",
+                "🔥 <b>/leak</b> - Cerca leak e mostra i terzini reali (LB/RB) con OVR <= 80 verificati su FUT.GG",
                 "🔮 <b>/simula [req]</b> - Es: <code>/simula Leak Evo LB RB Max 80 OVR</code>",
                 "🧮 <b>/tassa 50000</b> - Calcola pareggio (5%) e profitto"
             ]
@@ -421,42 +321,44 @@ def gestisci_comando(testo_msg, chat_id):
 
         elif cmd in ["/leak", "/evo"]:
             invia_telegram(
-                "⚡ <i>Estrazione schede FUT.GG filtrate per Ruolo (LB/RB) e Overall <= 80...</i>",
+                "⚡ <i>Ricerca Google Grounding attiva su site:fut.gg per estrarre i terzini LB/RB con OVR <= 80...</i>",
                 chat_id
             )
             leaks = leggi_leak_esclusivi_da_x_e_tg()
             t_leaks = "\n".join(leaks) if leaks else "Leak Evo LB RB Max 80 OVR (Fullback Evolution su X da FutSheriff / Fut_Scoreboard / FutPoliceLeaks)."
 
-            schede_db, m_ovr, ruoli_lk, links_schede = cerca_carte_con_id_completo_futgg(t_leaks)
+            m_ovr, ruoli_lk = estrai_parametri_da_leak(t_leaks)
             str_r = "/".join([r.upper() for r in ruoli_lk]) if ruoli_lk else "LB/RB"
 
             p_lines = [
                 f"ULTIMI LEAK INTERCETTATI:\n{t_leaks}\n",
-                f"SCHEDE CARTE COMPLETE ESTRATTE DA FUT.GG (RUOLO: {str_r} | OVR <= {m_ovr}):\n{schede_db[:3800]}\n",
-                f"Estrai dai dati qui sopra i giocatori reali che rispettano il ruolo ({str_r}) e il limite OVR (<= {m_ovr}), compilando Nome, Cognome, Club, PlayStyles e link!"
+                f"Cerca su Google (site:fut.gg/players) i migliori giocatori reali di EA Sports FC 27 per il ruolo [{str_r}] con Overall massimo [{m_ovr}] (OVR <= {m_ovr}).",
+                "Estrai i nomi completi, i club reali, i PlayStyles, i GG Rating e i link ufficiali di FUT.GG."
             ]
             analisi = analizza_leak_e_schede_con_gemini("\n".join(p_lines), max_ovr_f=m_ovr, ruoli_f=ruoli_lk)
-            box_links = formatta_box_link_schede(links_schede)
 
-            msg = f"🚨 <b>REPORT LEAK &amp; CARTE FUT.GG ({str_r} MAX {m_ovr} OVR):</b>\n\n{analisi}\n{box_links}"
+            msg = f"🚨 <b>REPORT LEAK &amp; CARTE FUT.GG ({str_r} MAX {m_ovr} OVR):</b>\n\n{analisi}"
             invia_telegram(msg, chat_id)
 
         elif cmd == "/simula":
             if len(parti) < 2:
-                invia_telegram("Usa: <code>/simula Leak Evo LB RB Max 80 OVR</code>", chat_id)
+                invia_telegram(
+                    "🔮 Scrivi il leak che vuoi simulare! Es:\n"
+                    "<code>/simula Leak Evo LB RB Max 80 OVR Max 6 PlayStyles</code>",
+                    chat_id
+                )
                 return
             q_in = " ".join(parti[1:])
-            invia_telegram("🔮 <i>Estrazione schede FUT.GG per i requisiti del leak...</i>", chat_id)
-            schede_db, m_ovr, ruoli_lk, links_schede = cerca_carte_con_id_completo_futgg(q_in)
+            invia_telegram("🔮 <i>Ricerca mirata su FUT.GG con Google Grounding...</i>", chat_id)
+            m_ovr, ruoli_lk = estrai_parametri_da_leak(q_in)
             str_r = "/".join([r.upper() for r in ruoli_lk]) if ruoli_lk else "LB/RB"
             p_sim = (
                 f"LEAK FORNITO DALL'UTENTE:\n'{q_in}'\n\n"
-                f"SCHEDE CARTE ESTRATTE DA FUT.GG (RUOLO: {str_r} | OVR <= {m_ovr}):\n{schede_db[:3800]}\n\n"
-                "Riporta i dettagli del leak e compila la lista dei giocatori reali estratti."
+                f"Cerca su site:fut.gg i giocatori di EA Sports FC 27 con Ruolo [{str_r}] e Overall massimo [{m_ovr}].\n"
+                "Compila la lista completa con Nome, Cognome, Club, PlayStyles, GG Rating e link FUT.GG."
             )
             risp = analizza_leak_e_schede_con_gemini(p_sim, max_ovr_f=m_ovr, ruoli_f=ruoli_lk)
-            box_links = formatta_box_link_schede(links_schede)
-            invia_telegram(f"🎯 <b>SIMULAZIONE ({str_r} MAX {m_ovr} OVR):</b>\n\n{risp}\n{box_links}", chat_id)
+            invia_telegram(f"🎯 <b>SIMULAZIONE ({str_r} MAX {m_ovr} OVR):</b>\n\n{risp}", chat_id)
 
         elif cmd == "/tassa":
             if len(parti) < 2:
@@ -478,11 +380,10 @@ def gestisci_comando(testo_msg, chat_id):
                 invia_telegram("Es: <code>/chiedi terzini max 80 fc 27</code>", chat_id)
                 return
             dom = " ".join(parti[1:])
-            invia_telegram("🧠 <i>Ricerca carte su FUT.GG...</i>", chat_id)
-            schede_db, m_ovr, ruoli_lk, links_schede = cerca_carte_con_id_completo_futgg(dom)
-            risp = analizza_leak_e_schede_con_gemini(f"Domanda: {dom}\n\n{schede_db[:3500]}", max_ovr_f=m_ovr, ruoli_f=ruoli_lk)
-            box_links = formatta_box_link_schede(links_schede)
-            invia_telegram(f"🤖 <b>RISPOSTA DB FUT.GG:</b>\n\n{risp}\n{box_links}", chat_id)
+            invia_telegram("🧠 <i>Ricerca su FUT.GG in corso...</i>", chat_id)
+            m_ovr, ruoli_lk = estrai_parametri_da_leak(dom)
+            risp = analizza_leak_e_schede_con_gemini(f"Domanda utente: {dom}", max_ovr_f=m_ovr or 80, ruoli_f=ruoli_lk or ["lb", "rb"])
+            invia_telegram(f"🤖 <b>RISPOSTA FUT.GG:</b>\n\n{risp}", chat_id)
 
     except Exception as e:
         invia_telegram(f"⚠️ Errore esecuzione comando: {e}", chat_id)
@@ -521,25 +422,23 @@ def scansiona_h24():
         if id_lk not in messaggi_gia_visti:
             messaggi_gia_visti.add(id_lk)
             if len(messaggi_gia_visti) > 3:
-                schede_db, m_ovr, ruoli_lk, links_schede = cerca_carte_con_id_completo_futgg(lk)
-                p_h24 = f"NUOVO LEAK:\n{lk}\n\nSCHEDE DB:\n{schede_db[:3500]}"
-                analisi = analizza_leak_e_schede_con_gemini(p_h24, max_ovr_f=m_ovr, ruoli_f=ruoli_lk)
-                box_links = formatta_box_link_schede(links_schede)
+                m_ovr, ruoli_lk = estrai_parametri_da_leak(lk)
+                analisi = analizza_leak_e_schede_con_gemini(f"NUOVO LEAK:\n{lk}", max_ovr_f=m_ovr, ruoli_f=ruoli_lk)
                 pul = lk.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                invia_telegram(f"🚨 <b>NUOVO LEAK!</b>\n📢 <i>{pul}</i>\n\n{analisi}\n{box_links}")
+                invia_telegram(f"🚨 <b>NUOVO LEAK INTERCETTATO!</b>\n📢 <i>{pul}</i>\n\n{analisi}")
 
 def motore_h24():
     invia_telegram(
-        "🎯 <b>BOT AGGIORNATO: FORZATURA FILTRO RUOLO (LB/RB) + OVR SULLE SCHEDE FUT.GG!</b>\n\n"
-        "• Ora lo scraper interroga FUT.GG passando esplicitamente i codici di posizione (es. <code>positions=2,4</code> per terzini) e l'overall massimo.\n"
-        "• Scrivi subito <b>/leak</b> per testarlo!"
+        "🎯 <b>BOT AGGIORNATO: GOOGLE GROUNDING INTEGRATO PER LE SCHEDE FUT.GG!</b>\n\n"
+        "• Ora l'interrogazione sfrutta la ricerca live verificata su <code>site:fut.gg</code> per popolare istantaneamente i nomi, i club e i playstyles dei terzini con OVR <= 80.\n"
+        "• Prova subito <b>/leak</b>!"
     )
     scansiona_h24()
     ult_ora = ""
     while True:
         try:
             scansiona_h24()
-            ora_s = datetime.now(timezone(timedelta(hours=2))) .strftime("%H:%M")
+            ora_s = datetime.now(timezone(timedelta(hours=2))).strftime("%H:%M")
             if ora_s != ult_ora and ora_s == "18:55":
                 invia_telegram("⏰ <b>18:55 - CONTENUTI EA TRA 5 MINUTI!</b>")
                 ult_ora = ora_s
@@ -549,7 +448,7 @@ def motore_h24():
 
 @app.route("/")
 def home():
-    return "FC 27 Position & OVR Enforced Bot OK!"
+    return "FC 27 Google Grounding Scraper OK!"
 
 threading.Thread(target=motore_h24, daemon=True).start()
 threading.Thread(target=ascolta_comandi, daemon=True).start()
@@ -557,3 +456,4 @@ threading.Thread(target=ascolta_comandi, daemon=True).start()
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+    
