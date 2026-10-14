@@ -17,7 +17,6 @@ TELEGRAM_CHAT_ID = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
 GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or "").strip()
 EA_TAX = 0.05
 
-# Canali X/Telegram prioritari monitorati ogni 60 secondi H24
 CANALI_X_LEAKERS = [
     "Fut_Scoreboard",
     "FutSheriff_Official",
@@ -27,14 +26,9 @@ CANALI_X_LEAKERS = [
     "fifatradingromania"
 ]
 
-PAROLE_TRIGGER_SIMULAZIONE = [
+PAROLE_TRIGGER = [
     "evo", "evolution", "max ", "req", "boost", "playstyle",
     "pace", "overall", "rating", "sbc", "potm", "leaked", "upcoming", "stats"
-]
-
-PAROLE_BANNATE = [
-    "patch", "title update", "career mode", "clubs", "fixes",
-    "fifa 20", "fifa 21", "fifa 22", "fifa 23", "fc 24", "fc 25"
 ]
 
 messaggi_gia_visti = set()
@@ -43,7 +37,8 @@ modello_scoperto = None
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9"
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache"
 }
 
 scraper = cloudscraper.create_scraper(
@@ -68,7 +63,7 @@ def invia_telegram(testo, chat_id=None):
 
 def trova_modelli_attivi():
     global modello_scoperto
-    modelli = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.0-flash", "gemini-flash-latest"]
+    modelli = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest"]
     if modello_scoperto and modello_scoperto not in modelli:
         modelli.insert(0, modello_scoperto)
     try:
@@ -84,43 +79,44 @@ def trova_modelli_attivi():
         pass
     return modelli
 
-def simula_carte_meta_futgg(prompt_specifico):
-    """Motore di Simulazione Automatica: valuta Requisiti + Boost + PlayStyles Meta + FUT.GG Meta Rating."""
+def analizza_senza_allucinazioni(prompt_specifico):
+    """Interroga Gemini OBBLIGANDO la verifica dei dati reali e vietando l'invenzione di prezzi o leak."""
     global modello_scoperto
     if not GEMINI_API_KEY:
         return "⚠️ Chiave GEMINI_API_KEY non trovata su Render."
 
-    oggi = datetime.now().strftime("%d/%m/%Y %H:%M")
+    tz_it = timezone(timedelta(hours=2))
+    oggi = datetime.now(tz_it).strftime("%d/%m/%Y %H:%M")
     sistema = (
-        f"Data e ora: {oggi}. Sei il motore di simulazione predittiva di EA Sports FC 27 Ultimate Team "
-        "(mercato PlayStation, budget 800.000 crediti). "
-        "DEVI SIMULARE IN ANTICIPO QUALI CARTE ESPLODERANNO DI PREZZO INCROCIANDO I LEAK DI X CON IL META RATING DI FUT.GG:\n"
-        "1) CRITERIO PLAYSTYLES META (FONDAMENTALE): Seleziona solo giocatori che possiedono già (o otterranno col boost senza sovrapporsi) "
-        "i PlayStyles più forti del meta di FC 27:\n"
-        "   - Difensori/Terzini: Anticipate (Anticipo), Jockey (Affronta), Intercept, Quick Step, Bruiser.\n"
-        "   - Centrocampisti: Incisive Pass (Filtrante), Pinged Pass (Passaggio Teso), Intercept, Tiki Taka, Press Proven, Technical.\n"
-        "   - Attaccanti/Ali: Finesse Shot (Tiro a Giro), Quick Step (Passo Veloce), Rapid (Rapido), Technical, Trivela.\n"
-        "2) CRITERIO FUT.GG META RATING: Scegli le carte 'al limite massimo dei requisiti' (es. se il leak dice Max 82 OVR, cerca gli 81-82 OVR, non i 76) "
-        "con Body Type meta, 4/5 stelle Skill/Piede Debole, ruoli secondari utili e link top (Francia, Brasile, Premier League, LaLiga, Serie A) "
-        "che raggiungeranno un Meta Rating di 90+ su FUT.GG una volta evoluti.\n"
-        "3) FORMATO RISPOSTA OBBLIGATORIO (Nessun discorso generico, solo 6-8 carte specifiche):\n"
-        "   Per ogni carta scrivi:\n"
-        "   • NOME E COGNOME + OVR + Versione (Oro/TOTW/Promo) + Club\n"
-        "   • PlayStyles attuali + Sinergia col Boost del Leak + Meta Rating FUT.GG previsto\n"
-        "   • Prezzo Max Acquisto ORA (su PS) -> Target Rivendita nell'Hype (netto tassa 5%).\n"
-        "Non usare mai simboli Markdown come asterischi (*) o cancelletti (#)."
+        f"Data e ora attuale italiana: {oggi}. Sei un analista tecnico di mercato di EA Sports FC Ultimate Team (PlayStation). "
+        "REGOLE FERREE ANTI-ALLUCINAZIONE (VIETATO INVENTARE DATI):\n"
+        "1) NON INVENTARE MAI leak, prezzi, Meta Rating o PlayStyles. Basati SOLO sui post reali forniti qui sotto e sulla ricerca web live.\n"
+        "2) PREZZI REALISTICI DEL MERCATO: Ricorda che le carte Oro Raro 75-82 OVR hanno un Price Range massimo di 10.000 crediti e di base costano "
+        "650 - 1.500 crediti (quando vanno in hype per un'Evo salgono a 2.500 - 9.500 crediti o vanno extinct a 10k, MAI a 50k o 150k!). "
+        "Solo le carte Promo/TOTW/Icon o Oro 88+ superano i 30k-100k.\n"
+        "3) DESCRIZIONE SPECIFICA DI OGNI LEAK: All'inizio della risposta elenca chiaramente QUALE leak o Evoluzione stai analizzando, "
+        "indicando: FONTE (@Fut_Scoreboard / @FutSheriff / FUT.GG), DATA e ORARIO di uscita del leak, REQUISITI ESATTI (Max OVR, Max Pace, Ruolo, Max PlayStyles) "
+        "e QUALI STATS (+Pace, +Shooting, +Passing...) e QUALI PLAYSTYLES / PLAYSTYLE+ va ad aggiungere.\n"
+        "4) Se nei dati ricevuti non c'è scritto il dettaglio di un boost o di un Meta Rating esatto, scrivi onestamente 'Non ancora specificato nel leak' "
+        "invece di tirare a indovinare.\n"
+        "5) Per ogni carta consigliata scrivi: Nome e Cognome, OVR e versione, perché entra nei requisiti dell'Evo, prezzo reale attuale su PS (es. 700-1.200 cr) e target reale nell'hype (es. 3.500-8.000 cr).\n"
+        "Non usare simboli Markdown come asterischi (*) o cancelletti (#). Usa solo elenchi con •."
     )
-    testo_completo = f"{sistema}\n\nDATI DA SIMULARE:\n{prompt_specifico}"
+    testo_completo = f"{sistema}\n\nDATI REALI RACCOLTI ORA:\n{prompt_specifico}"
 
     modelli_da_provare = trova_modelli_attivi()
     ultimo_errore = "Nessuna risposta"
 
     for modello in modelli_da_provare:
-        for con_search in [True, False]:
+        # Tenta prima con Google Search Grounding (sia 'google_search' che 'googleSearchRetrieval')
+        for tool_config in [[{"google_search": {}}], []]:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{modello}:generateContent?key={GEMINI_API_KEY}"
-            body = {"contents": [{"parts": [{"text": testo_completo}]}]}
-            if con_search:
-                body["tools"] = [{"google_search": {}}]
+            body = {
+                "contents": [{"parts": [{"text": testo_completo}]}],
+                "generationConfig": {"temperature": 0.1} # Temperatura bassissima = zero fantasia, massima precisione!
+            }
+            if tool_config:
+                body["tools"] = tool_config
             try:
                 r = requests.post(url, json=body, timeout=35)
                 risposta = r.json()
@@ -143,57 +139,98 @@ def simula_carte_meta_futgg(prompt_specifico):
 
     return f"⚠️ Errore API Gemini: {ultimo_errore[:140]}"
 
-def scarica_pagina_con_bypass(target_url):
+def scarica_html_grezzo(target_url):
+    """Scarica l'HTML originale senza cache per estrarre i tag <time> e i messaggi di Telegram."""
     tentativi = [
         target_url,
-        f"https://api.codetabs.com/v1/proxy?quest={quote(target_url, safe='')}",
         f"https://api.allorigins.win/raw?url={quote(target_url, safe='')}",
-        f"https://r.jina.ai/{target_url}"
+        f"https://api.codetabs.com/v1/proxy?quest={quote(target_url, safe='')}"
     ]
     for u in tentativi:
         try:
             resp = scraper.get(u, headers=HEADERS, timeout=12)
-            if resp.status_code == 200 and len(resp.text) > 300:
+            if resp.status_code == 200 and len(resp.text) > 500:
                 return resp.text
         except Exception:
             continue
     return ""
 
-def leggi_leak_x_e_telegram():
-    """Legge gli ultimissimi post dai canali mirror dei leaker di X."""
+def scarica_testo_jina(target_url):
+    """Usa il reader Jina con X-No-Cache per leggere i contenuti testuali di FUT.GG superando Cloudflare."""
+    try:
+        h = dict(HEADERS)
+        h["X-No-Cache"] = "true"
+        resp = requests.get(f"https://r.jina.ai/{target_url}", headers=h, timeout=15)
+        if resp.status_code == 200:
+            return resp.text
+    except Exception:
+        pass
+    return ""
+
+def leggi_leak_telegram_con_data_ora():
+    """Estrae gli ultimi post reali dei leaker con DATA, ORA ESATTA e TESTO COMPLETO."""
     raccolta = []
+    tz_it = timezone(timedelta(hours=2))
+
     for canale in CANALI_X_LEAKERS:
-        html = scarica_pagina_con_bypass(f"https://t.me/s/{canale}")
-        if "tgme_widget_message_text" in html:
+        html = scarica_html_grezzo(f"https://t.me/s/{canale}")
+        if "tgme_widget_message" in html:
             soup = BeautifulSoup(html, "html.parser")
-            blocchi = soup.find_all("div", class_="tgme_widget_message_text")
-            for b in blocchi[-3:]:
-                txt = b.get_text(separator=" ").strip()
-                txt_low = txt.lower()
-                if len(txt) > 20 and "Download" not in txt and "Send Message" not in txt:
-                    if not any(ban in txt_low for ban in PAROLE_BANNATE):
-                        raccolta.append((f"@{canale}", txt[:350]))
+            messaggi = soup.find_all("div", class_="tgme_widget_message")
+            for m in messaggi[-4:]:
+                box_testo = m.find("div", class_="tgme_widget_message_text")
+                if not box_testo:
+                    continue
+                txt = box_testo.get_text(separator=" ").strip()
+                if len(txt) < 15:
+                    continue
+
+                # Estrae Data e Ora esatta dal tag <time datetime="..."> di Telegram
+                data_ora_str = "Orario N/D"
+                tag_time = m.find("time")
+                if tag_time and tag_time.get("datetime"):
+                    try:
+                        dt_utc = datetime.fromisoformat(tag_time["datetime"].replace("Z", "+00:00"))
+                        dt_it = dt_utc.astimezone(tz_it)
+                        data_ora_str = dt_it.strftime("%d/%m/%Y ore %H:%M")
+                    except Exception:
+                        data_ora_str = tag_time.get("datetime")[:16]
+
+                raccolta.append({
+                    "canale": f"@{canale}",
+                    "data_ora": data_ora_str,
+                    "testo": txt[:450]
+                })
     return raccolta
 
-def estrai_dati_futgg():
-    """Estrae da FUT.GG i giocatori in hype (Momentum / Best Evolutions / Trending)."""
-    giocatori_hype = []
-    urls = [
-        "https://www.fut.gg/evolutions/best/",
-        "https://www.fut.gg/evolutions/trending/",
-        "https://www.fut.gg/players/momentum/"
-    ]
-    for u in urls:
-        html_p = scarica_pagina_con_bypass(u)
-        if html_p:
-            matches = re.findall(r"/players/\d+-([a-zA-Z0-9-]+)/", html_p)
-            for slug in matches:
-                nome = slug.replace("-", " ").title()
-                if len(nome) > 3 and nome not in giocatori_hype:
-                    giocatori_hype.append(nome)
-        if len(giocatori_hype) >= 18:
-            break
-    return giocatori_hype[:18]
+def leggi_dettagli_evo_e_trending_futgg():
+    """Legge da FUT.GG i nomi reali delle Evoluzioni, i loro dettagli e i giocatori in Momentum."""
+    testo_evo_page = scarica_testo_jina("https://www.fut.gg/evolutions/")
+    testo_momentum = scarica_testo_jina("https://www.fut.gg/players/momentum/")
+    testo_best_evo = scarica_testo_jina("https://www.fut.gg/evolutions/trending/")
+
+    # Estrae i nomi dei calciatori più caldi
+    giocatori = []
+    for sorgente in [testo_best_evo, testo_momentum]:
+        matches = re.findall(r"/players/\d+-([a-zA-Z0-9-]+)/", sorgente)
+        for slug in matches:
+            nome = slug.replace("-", " ").title()
+            if len(nome) > 3 and nome not in giocatori:
+                giocatori.append(nome)
+
+    # Estrae i link e nomi delle Evoluzioni attive su FUT.GG
+    evoluzioni = []
+    links_evo = re.findall(r"/evolutions/\d+-([a-zA-Z0-9-]+)/", testo_evo_page)
+    for slug in links_evo:
+        nome_e = slug.replace("-", " ").title()
+        if nome_e not in evoluzioni:
+            evoluzioni.append(nome_e)
+
+    # Prende anche un estratto pulito del testo della pagina Evoluzioni di FUT.GG (dove ci sono requisiti e boost)
+    righe_evo = [r.strip() for r in testo_evo_page.split("\n") if len(r.strip()) > 25 and "http" not in r]
+    estratto_dettagli_evo = "\n".join(righe_evo[:25])
+
+    return evoluzioni[:8], giocatori[:15], estratto_dettagli_evo[:1500]
 
 def gestisci_comando(testo_msg, chat_id):
     parti = testo_msg.strip().split()
@@ -203,230 +240,62 @@ def gestisci_comando(testo_msg, chat_id):
 
     if comando in ["/start", "/help", "/menu"]:
         menu = (
-            "🎯 <b>BOT AUTO-SIMULATORE LEAK X, PLAYSTYLES & FUT.GG META</b>\n"
-            "💰 Budget: 800.000 crediti (PlayStation)\n"
-            "📡 <i>Monitoraggio Live H24 attivo ogni 60 secondi!</i>\n\n"
-            "🔥 <b>/leak</b> (COMANDO TUTTO-IN-UNO)\n"
-            "Cerca all'istante gli ultimi leak di X (@FutSheriff, @Fut_Scoreboard, @AsyFutTrader) e <b>simula automaticamente</b> le carte migliori per PlayStyles e Meta Rating di FUT.GG.\n\n"
-            "🔮 <b>/simula [requisiti + boost]</b>\n"
-            "Simula manualmente un requisito specifico su FUT.GG.\n\n"
-            "🧬 <b>/evo</b> - Classifica carte con Meta Rating più alto e PlayStyles top nelle Evo di FUT.GG\n"
-            "🧮 <b>/tassa 50000</b> - Calcola pareggio (5%) e profitto\n"
-            "🧠 <b>/chiedi [domanda]</b> - Domanda libera al bot"
+            "🎯 <b>BOT SNIPER REAL-DATA (ZERO ALLUCINAZIONI)</b>\n"
+            "💰 Budget: 800.000 crediti (PlayStation)\n\n"
+            "🔥 <b>/leak</b> - Mostra gli ultimi leak REALI con <b>Data, Ora, Stats e PlayStyles aggiunti</b> + carte reali con prezzi veri (700-10k cr per gli Oro, ecc.)\n\n"
+            "🧬 <b>/evo</b> - Legge le Evoluzioni reali su FUT.GG, requisiti, boost e giocatori in trending\n\n"
+            "🔮 <b>/simula [requisiti e boost]</b> - Analizza un leak specifico che hai visto su X\n\n"
+            "🧮 <b>/tassa 50000</b> - Calcola pareggio (5%) e profitto"
         )
         invia_telegram(menu, chat_id)
 
     elif comando == "/leak":
-        invia_telegram(
-            "🕵️‍♂️ <i>Ricerca immediata ultimi Leak di X + Auto-Simulazione PlayStyles Meta e FUT.GG Meta Rating in corso...</i>",
-            chat_id
-        )
-        leaks = leggi_leak_x_e_telegram()
-        giocatori_futgg = estrai_dati_futgg()
+        invia_telegram("🕵️‍♂️ <i>Estrazione post REALI con Data/Ora dai canali Leak + Verifica Evoluzioni e Prezzi su FUT.GG...</i>", chat_id)
+        leaks = leggi_leak_telegram_con_data_ora()
+        evoluzioni_attive, giocatori_caldi, dettagli_evo_futgg = leggi_dettagli_evo_e_trending_futgg()
 
-        contesto_leak = "\n".join([f"{c}: {t}" for c, t in leaks]) if leaks else "Cerca direttamente gli ultimi post X di @FutSheriff, @Fut_Scoreboard, @AsyFutTrader e @DonkTrading."
-        contesto_futgg = ", ".join(giocatori_futgg) if giocatori_futgg else "Classifica Meta Rating FUT.GG"
-
-        prompt = (
-            f"ULTIMI LEAK INTERCETTATI DAI CANALI X/TELEGRAM:\n{contesto_leak}\n\n"
-            f"CARTE ATTUALMENTE IN CIMA A FUT.GG (BEST/TRENDING/MOMENTUM): {contesto_futgg}\n\n"
-            "ESEGUI ORA LA SIMULAZIONE AUTOMATICA:\n"
-            "1) Prendi gli ultimissimi leak delle ultime ore su EA FC 27 (nuove Evoluzioni con requisiti e boost, o nuove SBC/Promo leakate da @FutSheriff e @Fut_Scoreboard).\n"
-            "2) Simula automaticamente l'incrocio tra REQUISITI + BOOST previsti e il database di FUT.GG.\n"
-            "3) Seleziona 6-8 GIOCATORI ESATTI (Nome, Cognome, OVR e Club) che hanno i PLAYSTYLES PIÙ IN META (Anticipate, Quick Step, Finesse Shot, Incisive Pass, Intercept, Technical, Rapid) "
-            "e che otterranno il META RATING PIÙ ALTO su FUT.GG.\n"
-            "4) Indica per ogni carta: Nome e Cognome, PlayStyles chiave, perché sarà la più desiderata dalla community, prezzo di acquisto immediato su PS e target di rivendita."
-        )
-        simulazione = simula_carte_meta_futgg(prompt)
-
-        msg = "🚨 <b>ULTIMI LEAK X & AUTO-SIMULAZIONE CARTE META (FUT.GG):</b>\n\n"
+        # Prepara il blocco con Data e Ora esatta dei post reali
         if leaks:
-            for c, t in leaks[-3:]:
-                pulito = t.replace("<", "&lt;").replace(">", "&gt;")
-                msg += f"🐦 <b>{c}:</b> <i>{pulito[:180]}</i>\n\n"
-        if giocatori_futgg:
-            msg += f"📈 <b>Top FUT.GG Best/Momentum:</b> <code>{', '.join(giocatori_futgg[:8])}</code>\n\n"
-        msg += f"🔮 <b>SIMULAZIONE CARTE DA COMPRARE ORA (PLAYSTYLES & META RATING):</b>\n{simulazione}"
-        invia_telegram(msg, chat_id)
+            blocco_leaks_reali = "\n".join([f"- [{x['data_ora']}] {x['canale']}: {x['testo']}" for x in leaks[-8:]])
+        else:
+            blocco_leaks_reali = "Nessun post estratto da Telegram web in questo istante."
 
-    elif comando == "/simula":
-        if len(parti) < 2:
-            invia_telegram(
-                "🔮 <b>SIMULATORE PLAYSTYLES & META RATING FUT.GG</b>\n"
-                "Scrivi i requisiti/boost del leak:\n"
-                "<code>/simula Evo DC Max 83 OVR Max 82 PAC Boost +8 PAC PlayStyle+ Anticipate</code>",
-                chat_id
-            )
-            return
-        leak_input = " ".join(parti[1:])
-        invia_telegram("🔮 <i>Simulazione PlayStyles Meta + Calcolo Meta Rating FUT.GG in corso...</i>", chat_id)
         prompt = (
-            f"Simula questo leak di Evoluzione per EA FC 27:\n'{leak_input}'\n\n"
-            "Trova nel database di FUT.GG gli 8 GIOCATORI ESATTI (Nome, Cognome, OVR, Versione e Club) che:\n"
-            "• Rientrano al limite massimo dei requisiti.\n"
-            "• Hanno già i migliori PlayStyles in meta (es. Quick Step, Anticipate, Finesse Shot, Incisive Pass, Jockey, Technical) che si combinano col boost.\n"
-            "• Raggiungeranno il Meta Rating più alto su FUT.GG.\n"
-            "Indica per ciascuno prezzo di acquisto su PS e target di rivendita."
+            f"ULTIMI POST REALI ESTRATTI CON DATA E ORA DAI LEAKER:\n{blocco_leaks_reali}\n\n"
+            f"EVOLUZIONI ATTUALMENTE RILEVATE SU FUT.GG: {', '.join(evoluzioni_attive)}\n"
+            f"ESTRATTO PAGINA EVOLUZIONI FUT.GG:\n{dettagli_evo_futgg}\n\n"
+            f"GIOCATORI PIÙ CLICCATI ORA SU FUT.GG (TRENDING/MOMENTUM): {', '.join(giocatori_caldi)}\n\n"
+            "ISTRUZIONI TASSATIVE:\n"
+            "1) Prima di tutto, descrivi in modo specifico QUALI sono gli ultimi leak o le ultime Evoluzioni reali presenti nei dati qui sopra "
+            "(o trovati tramite ricerca web delle ultime 24 ore), specificando per ciascuno: GIORNO E ORARIO del leak, REQUISITI ESATTI, "
+            "QUALI STATS (+Pace, +Shooting, +Dribbling, ecc.) e QUALI PLAYSTYLES va ad aggiungere.\n"
+            "2) Poi indica 5-6 CARTE REALI (Nome, Cognome, OVR, Club) tra quelle in Trending su FUT.GG o che entrano in questi requisiti.\n"
+            "3) USA SOLO PREZZI REALI DI MERCATO: se consigli una carta Oro Raro 78-82 OVR (come Nusa, Gruda, Gloukh, Neto), ricorda che il suo prezzo base è 700-1.500 crediti "
+            "e nell'hype di un'Evo sale tra 2.500 e 9.500 crediti (max price range 10.000). NON scrivere mai prezzi assurdi come 50.000 o 150.000 per una carta oro bassa!"
         )
-        risp = simula_carte_meta_futgg(prompt)
-        invia_telegram(f"🎯 <b>RISULTATO SIMULAZIONE PLAYSTYLES & META RATING:</b>\n\n{risp}", chat_id)
+        analisi = analizza_senza_allucinazioni(prompt)
+
+        msg = "🚨 <b>ULTIMI LEAK VERIFICATI (CON DATA/ORA, STATS & PLAYSTYLES):</b>\n\n"
+        if leaks:
+            for item in leaks[-4:]:
+                pulito = item["testo"].replace("<", "&lt;").replace(">", "&gt;")
+                msg += f"🕒 <b>{item['data_ora']} | {item['canale']}:</b>\n<i>{pulito[:220]}</i>\n\n"
+        else:
+            msg += "⚠️ <i>Canali Telegram temporaneamente schermati, analisi basata sui dati live estratti da FUT.GG:</i>\n\n"
+
+        if evoluzioni_attive:
+            msg += f"🧬 <b>Ultime Evo su FUT.GG:</b> <code>{', '.join(evoluzioni_attive[:5])}</code>\n"
+        if giocatori_caldi:
+            msg += f"📈 <b>Giocatori più cercati ora:</b> <code>{', '.join(giocatori_caldi[:8])}</code>\n\n"
+
+        msg += f"🎯 <b>DETTAGLIO LEAK (STATS/PLAYSTYLES) & CARTE REALI:</b>\n{analisi}"
+        invia_telegram(msg, chat_id)
 
     elif comando == "/evo":
-        invia_telegram("🧬 <i>Analisi PlayStyles Meta e Classifica Meta Rating FUT.GG in corso...</i>", chat_id)
-        giocatori_futgg = estrai_dati_futgg()
-        nomi_player = ", ".join(giocatori_futgg) if giocatori_futgg else "fut.gg/evolutions/best/"
+        invia_telegram("🧬 <i>Lettura diretta delle Evoluzioni attive, Requisiti, Boost e Trending su FUT.GG...</i>", chat_id)
+        evoluzioni_attive, giocatori_caldi, dettagli_evo_futgg = leggi_dettagli_evo_e_trending_futgg()
 
         prompt = (
-            f"Carte attualmente in evidenza su FUT.GG Best & Trending: {nomi_player}.\n"
-            "Analizza le ultime Evoluzioni e le catene di Evoluzioni (Evo Chains) di EA FC 27 su FUT.GG. "
-            "Dammi 7 NOMI E COGNOMI di carte scambiabili sul mercato PlayStation (fascia 1.500 - 100.000 crediti) "
-            "che hanno il META RATING più alto su FUT.GG grazie ai loro PlayStyles (Anticipate, Finesse Shot, Quick Step, Incisive Pass, Rapid) "
-            "con prezzo di acquisto e target di vendita."
-        )
-        consiglio = simula_carte_meta_futgg(prompt)
-        msg = (
-            f"🔥 <b>TOP META RATING & PLAYSTYLES (FUT.GG):</b>\n\n"
-            f"⚡ <b>Rilevati su FUT.GG:</b> <code>{nomi_player}</code>\n\n"
-            f"🧠 <b>CARTE CON IL META RATING PIÙ ALTO DA COMPRARE:</b>\n{consiglio}\n\n"
-            f"🔗 <a href='https://www.fut.gg/evolutions/best/'>Apri FUT.GG Best Meta Rating</a>"
-        )
-        invia_telegram(msg, chat_id)
-
-    elif comando == "/tassa":
-        if len(parti) < 2:
-            invia_telegram("Usa: <code>/tassa 50000</code> o <code>/tassa 50000 60000</code>", chat_id)
-            return
-        try:
-            buy = int(parti[1].replace(".", "").replace("k", "000"))
-            pareggio = int(buy / (1 - EA_TAX)) + 100
-            consigliato = int(buy * 1.12)
-            sell = int(parti[2].replace(".", "").replace("k", "000")) if len(parti) >= 3 else consigliato
-            tassa = int(sell * EA_TAX)
-            netto = (sell - tassa) - buy
-            qta = max(1, int(250000 // buy))
-            msg = (
-                f"🧮 <b>CALCOLATORE TASSA EA (5%)</b>\n\n"
-                f"🛒 Acquisto: <b>{buy:,}</b>\n"
-                f"⚖️ Pareggio (Break-Even): <b>{pareggio:,}</b>\n"
-                f"🎯 Vendita: <b>{sell:,}</b> (Tassa: -{tassa:,})\n"
-                f"✅ <b>Utile netto a carta: {netto:+,}</b>\n"
-                f"📦 Su 250k ({qta} carte): <b>{netto * qta:+,} crediti</b>"
-            )
-            invia_telegram(msg, chat_id)
-        except Exception:
-            invia_telegram("⚠️ Inserisci solo numeri! Es: <code>/tassa 40000</code>", chat_id)
-
-    elif comando == "/chiedi":
-        if len(parti) < 2:
-            invia_telegram("Scrivi una domanda! Es: <code>/chiedi migliori DC con PlayStyle Anticipo sotto i 50k per future Evo?</code>", chat_id)
-            return
-        domanda = " ".join(parti[1:])
-        invia_telegram("🧠 <i>Simulazione PlayStyles e Meta Rating su FUT.GG in corso...</i>", chat_id)
-        risp = simula_carte_meta_futgg(domanda)
-        invia_telegram(f"🤖 <b>ANALISI META RATING & PLAYSTYLES:</b>\n\n{risp}", chat_id)
-
-def ascolta_comandi_telegram():
-    global ultimo_update_id
-    base_tg = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-    try:
-        r = requests.get(f"{base_tg}/getUpdates?timeout=1", timeout=5).json()
-        if r.get("ok") and r.get("result"):
-            ultimo_update_id = r["result"][-1]["update_id"] + 1
-    except Exception:
-        pass
-
-    while True:
-        try:
-            url = f"{base_tg}/getUpdates?offset={ultimo_update_id}&timeout=20"
-            resp = requests.get(url, timeout=25).json()
-            if resp.get("ok"):
-                for item in resp.get("result", []):
-                    ultimo_update_id = item["update_id"] + 1
-                    msg = item.get("message", {})
-                    txt = msg.get("text", "")
-                    cid = msg.get("chat", {}).get("id")
-                    if txt.startswith("/") and cid:
-                        t = threading.Thread(
-                            target=gestisci_comando,
-                            args=(txt, cid),
-                            daemon=True
-                        )
-                        t.start()
-        except Exception:
-            time.sleep(3)
-
-# ================= MONITORAGGIO LIVE H24 (OGNI 60 SECONDI) =================
-def scansiona_e_simula_h24():
-    """Controlla ogni 60 secondi i canali dei leaker. Appena esce un leak, simula da solo le carte migliori e manda la notifica."""
-    global messaggi_gia_visti
-    leaks = leggi_leak_x_e_telegram()
-    for fonte, txt in leaks:
-        id_msg = hash(txt[:85])
-        if id_msg not in messaggi_gia_visti:
-            messaggi_gia_visti.add(id_msg)
-            txt_low = txt.lower()
-            if any(k in txt_low for k in PAROLE_TRIGGER_SIMULAZIONE):
-                # Evita di mandare i post già presenti al momento del riavvio del server
-                if len(messaggi_gia_visti) > 5:
-                    giocatori_futgg = estrai_dati_futgg()
-                    simulazione_auto = simula_carte_meta_futgg(
-                        f"ALERT AUTOMATICO H24 - NUOVO LEAK APPENA PUBBLICATO DA {fonte}:\n'{txt}'\n"
-                        f"Carte attualmente in tendenza su FUT.GG: {', '.join(giocatori_futgg[:8])}.\n"
-                        "SIMULA IMMEDIATAMENTE: in base ai requisiti e ai boost di questo leak, trova nel database di FUT.GG "
-                        "i 6 NOMI E COGNOMI ESATTI delle carte che hanno i PlayStyles più in meta (Anticipate, Quick Step, Finesse Shot, Incisive Pass, Intercept, Technical) "
-                        "e che avranno il Meta Rating più alto su FUT.GG. Indica prezzo massimo di acquisto ORA su PS e target di rivendita!"
-                    )
-                    pulito = txt[:320].replace("<", "&lt;").replace(">", "&gt;")
-                    notifica_push = (
-                        f"🚨 <b>NUOVO LEAK LIVE RILEVATO DA {fonte}!</b>\n\n"
-                        f"📝 <i>{pulito}</i>\n\n"
-                        f"🔮 <b>SIMULAZIONE AUTOMATICA (PLAYSTYLES & META RATING FUT.GG):</b>\n{simulazione_auto}\n\n"
-                        f"🔗 <a href='https://www.fut.gg/evolutions/best/'>Apri FUT.GG Meta Rating</a> | "
-                        f"<a href='https://www.fut.gg/players/momentum/'>Momentum Live</a>"
-                    )
-                    invia_telegram(notifica_push)
-
-def motore_h24():
-    avvio = (
-        "🔥 <b>SISTEMA AUTO-SIMULAZIONE H24 + PLAYSTYLES META ATTIVO!</b>\n\n"
-        "• <b>Monitoraggio Live H24 (ogni 60s):</b> Appena esce un leak su @FutSheriff, @Fut_Scoreboard o @AsyFutTrader, il bot simula da solo i PlayStyles Meta e il Meta Rating di FUT.GG e ti manda subito la notifica con i Nomi da comprare!\n"
-        "• <b>Comando /leak immediato:</b> Scrivilo ora per forzare subito la ricerca e la simulazione automatica sugli ultimi leak usciti!"
-    )
-    invia_telegram(avvio)
-    scansiona_e_simula_h24()
-    ultimo_orario = ""
-
-    while True:
-        try:
-            scansiona_e_simula_h24()
-            tz_it = timezone(timedelta(hours=2))
-            now = datetime.now(tz_it)
-            ora_str = now.strftime("%H:%M")
-
-            if ora_str != ultimo_orario:
-                if ora_str == "18:55":
-                    invia_telegram(
-                        "⏰ <b>18:55 - DROP EA TRA 5 MINUTI!</b>\n"
-                        "• Vendi ORA nell'hype le carte comprate sui leak.\n"
-                        "• Alle 19:01 scrivi <b>/leak</b> o <b>/evo</b> per la simulazione sul nuovo contenuto!"
-                    )
-                    ultimo_orario = ora_str
-                elif ora_str == "08:55" and now.weekday() == 3:
-                    invia_telegram("📉 <b>08:55 - PREMI RIVALS TRA 5 MINUTI!</b>")
-                    ultimo_orario = ora_str
-
-            # Scansione continua ogni 60 secondi H24
-            time.sleep(60)
-        except Exception:
-            time.sleep(60)
-
-@app.route("/")
-def home():
-    return "FC 27 Auto-Simulator H24 (PlayStyles & FUT.GG Meta Rating) Running!"
-
-threading.Thread(target=motore_h24, daemon=True).start()
-threading.Thread(target=ascolta_comandi_telegram, daemon=True).start()
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+            f"EVOLUZIONI RILEVATE SU FUT.GG: {', '.join(evoluzioni_attive)}\n"
+            f"TESTO ESTRATTO DA FUT.GG EVOLUTIONS:\n{dettagli_evo_futgg}\n"
+            f"GIOCATORI IN TRENDING EVO SU FUT.GG: {', '.join(giocatori
